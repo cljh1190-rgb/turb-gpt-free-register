@@ -184,7 +184,10 @@ def _trigger_reauth(session: BrowserSession, email: str) -> str:
     """
     # 重新拿一次 csrf（旧的可能已过期）
     csrf_url = "https://chatgpt.com/api/auth/csrf"
-    csrf_resp = session.get(csrf_url, headers=session.get_nextauth_headers(referer="https://chatgpt.com/"))
+    # csrf 是纯 GET，不该带 content-type；带上容易被 WAF 判异常
+    _csrf_headers = session.get_nextauth_headers(referer="https://chatgpt.com/")
+    _csrf_headers.pop("content-type", None)
+    csrf_resp = session.get(csrf_url, headers=_csrf_headers)
     csrf_resp.raise_for_status()
     csrf_token = csrf_resp.json()["csrfToken"]
     logger.info(f"[2FA] 重认证 CSRF: {csrf_token[:20]}...")
@@ -235,7 +238,7 @@ def _validate_reauth_otp(session: BrowserSession, code: str) -> str:
     返回 continue_url（带 code 参数的 callback URL，用于跳回 chatgpt.com）。
     """
     url = "https://auth.openai.com/api/accounts/email-otp/validate"
-    headers = session.get_auth_headers(referer="https://auth.openai.com/email-verification")
+    headers = session.get_auth_headers(referer="https://auth.openai.com/email-verification", method="POST")
     body = json.dumps({"code": code})
 
     logger.info(f"[2FA] 提交重认证 OTP: {code}")
@@ -269,7 +272,7 @@ def _enroll_totp(session: BrowserSession, access_token: str) -> tuple[str, str]:
     步骤6: 注册 TOTP，返回 (secret, session_id)
     """
     url = "https://chatgpt.com/backend-api/accounts/mfa/enroll"
-    headers = session.get_chatgpt_headers(referer="https://chatgpt.com/")
+    headers = session.get_chatgpt_headers(referer="https://chatgpt.com/", method="POST")
     headers["authorization"] = f"Bearer {access_token}"
     headers["oai-device-id"] = session.device_id
     headers["oai-language"] = session.navigator_language()
@@ -300,7 +303,7 @@ def _activate_totp(
     步骤7: 用 secret 生成 6 位 TOTP 码，激活 2FA。
     """
     url = "https://chatgpt.com/backend-api/accounts/mfa/user/activate_enrollment"
-    headers = session.get_chatgpt_headers(referer="https://chatgpt.com/")
+    headers = session.get_chatgpt_headers(referer="https://chatgpt.com/", method="POST")
     headers["authorization"] = f"Bearer {access_token}"
     headers["oai-device-id"] = session.device_id
     headers["oai-language"] = session.navigator_language()
@@ -321,6 +324,60 @@ def _activate_totp(
     if not data.get("success"):
         raise RuntimeError(f"激活返回 success=false: {data}")
     return True
+
+
+def import_browser_cookies(session: BrowserSession, driver) -> None:
+    """把浏览器驱动的登录 Cookie 导入 HTTP 会话，让 2FA/reauth 复用同一登录态。"""
+    if driver is None:
+        return
+    try:
+        cookies: list[dict] = []
+        if hasattr(driver, "get_cookies"):
+            try:
+                cookies = driver.get_cookies() or []
+            except Exception:
+                cookies = []
+        if not cookies and hasattr(driver, "context"):
+            try:
+                cookies = driver.context.cookies() or []
+            except Exception:
+                cookies = []
+        imported = 0
+        for c in cookies:
+            name = str(c.get("name") or "").strip()
+            value = str(c.get("value") or "")
+            domain = str(c.get("domain") or "").strip()
+            path = str(c.get("path") or "/")
+            if not name or not domain:
+                continue
+            try:
+                session.session.cookies.set(name, value, domain=domain, path=path)
+                imported += 1
+            except Exception:
+                pass
+        if imported:
+            logger.info("[2FA] 已导入 %s 个浏览器 Cookie 到 2FA 会话", imported)
+    except Exception as exc:
+        logger.warning("[2FA] 导入浏览器 Cookie 失败: %s: %s", type(exc).__name__, str(exc)[:160])
+
+
+def maybe_setup_2fa(session: BrowserSession, email: str, driver=None) -> str | None:
+    """注册完成后按 ENABLE_2FA 开关尝试设置 2FA；失败不抛出，返回 TOTP secret 或 None。"""
+    try:
+        from config import twofa as _twofa_cfg
+        from config import email as _email_cfg
+        if not bool(getattr(_twofa_cfg, "ENABLE_2FA", False)):
+            return None
+        if not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", False)):
+            logger.warning("[2FA] USE_EMAIL_SERVICE=False，后台无法自动收取重认证 OTP，跳过 2FA 设置")
+            return None
+        import_browser_cookies(session, driver)
+        secret = setup_2fa(session, email)
+        logger.info("[2FA] 设置完成: %s secret=%s...%s", email, secret[:4], secret[-4:])
+        return secret
+    except Exception as exc:
+        logger.warning("[2FA] 设置失败（不影响账号保存）: %s: %s", type(exc).__name__, str(exc)[:200])
+        return None
 
 
 def setup_2fa(session: BrowserSession, email: str, otp_code: str | None = None) -> str:
@@ -436,11 +493,19 @@ def save_account_data(
     try:
         from core.plan_check_service import enqueue_account_plan_check
 
+        browser_profile = extra.get("browser_profile") if isinstance(extra.get("browser_profile"), dict) else None
+        timezone_offset_min = "-"
+        if browser_profile and browser_profile.get("timezone_offset_minutes") is not None:
+            timezone_offset_min = str(-int(browser_profile.get("timezone_offset_minutes") or 0))
         queued = enqueue_account_plan_check(
             account_id=row_id,
             email=email,
             access_token=access_token,
             trigger="registration_auto",
+            proxy=proxy_used,
+            timezone_offset_min=timezone_offset_min,
+            device_id=extra.get("device_id"),
+            browser_profile=browser_profile,
         )
         if queued.get("accepted"):
             logger.info(f"[Plan] 注册后自动查询已入队: id={row_id}, email={email}")
@@ -451,6 +516,16 @@ def save_account_data(
     except Exception as exc:
         logger.warning(
             f"[Plan] 注册后自动查询入队异常（不影响注册结果）: "
+            f"{email}, {type(exc).__name__}: {str(exc)[:180]}"
+        )
+    # 注册成功账号自动入号池（try/except 包裹，保证不影响注册主流程）
+    try:
+        from core.account_pool import set_account_pool_state
+        set_account_pool_state(row_id, enabled=True)
+        logger.info(f"[Pool] 账号已自动入池: id={row_id}, email={email}")
+    except Exception as exc:
+        logger.warning(
+            f"[Pool] 注册后自动入池失败（不影响注册结果）: "
             f"{email}, {type(exc).__name__}: {str(exc)[:180]}"
         )
     return row_id

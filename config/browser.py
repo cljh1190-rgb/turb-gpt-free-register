@@ -20,41 +20,86 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
-def _latest_chrome_major(default: str = "149") -> str:
-    """兼容旧模块导入；默认按 2026-07-19 抓包里的 Chrome 149 画像。"""
+def _latest_chrome_major(default: str = "146") -> str:
+    """兼容旧模块导入；默认与 CloakBrowser/curl_cffi 的 Chrome 146 对齐。"""
     return default
 
 
-CHROME_MAJOR = "149"
-CHROME_FULL_VERSION = "149.0.0.0"
+CHROME_MAJOR = "146"
+CHROME_FULL_VERSION = "146.0.7680.177"
 
 SAFARI_VERSION = ""
 SAFARI_WEBKIT_VERSION = "537.36"
-MAC_OS_UA_VERSION = "10_15_7"
+WINDOWS_NT_UA_VERSION = "10.0"
 
 # ---------- curl_cffi 模拟浏览器 ----------
-# curl_cffi 0.15 当前最高内置到 chrome146；HTTP/JS 画像按抓包补齐到 Chrome/149。
+# curl_cffi、CloakBrowser 运行时和 HTTP/JS 画像统一使用 Chrome 146。
 IMPERSONATE = "chrome146"
+
+# TLS 指纹轮换池：全部为 curl_cffi 0.15.0 实际支持的 impersonate 目标
+# （已在本地 python -c 逐个验证 Session(impersonate=...) 可创建）。
+# 每个 bundle 的 UA / sec-ch-ua / sec-ch-ua-full-version-list 与 impersonate
+# 的 Chrome major 自洽；UA 采用 Chrome 110+ 冻结格式 Chrome/<major>.0.0.0，
+# full version 取各 major 的稳定版真实版本号。
+TLS_IMPRESONATE_POOL = [
+    {
+        "impersonate": "chrome124",
+        "chrome_major": "124",
+        "chrome_full_version": "124.0.6367.207",
+        "sec_ch_ua": '"Chromium";v="124", "Not-A.Brand";v="24", "Google Chrome";v="124"',
+        "sec_ch_ua_full_version_list": '"Chromium";v="124.0.6367.207", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="124.0.6367.207"',
+    },
+    {
+        "impersonate": "chrome131",
+        "chrome_major": "131",
+        "chrome_full_version": "131.0.6778.86",
+        "sec_ch_ua": '"Chromium";v="131", "Not-A.Brand";v="24", "Google Chrome";v="131"',
+        "sec_ch_ua_full_version_list": '"Chromium";v="131.0.6778.86", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="131.0.6778.86"',
+    },
+    {
+        "impersonate": "chrome136",
+        "chrome_major": "136",
+        "chrome_full_version": "136.0.7103.94",
+        "sec_ch_ua": '"Chromium";v="136", "Not-A.Brand";v="24", "Google Chrome";v="136"',
+        "sec_ch_ua_full_version_list": '"Chromium";v="136.0.7103.94", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="136.0.7103.94"',
+    },
+    {
+        "impersonate": "chrome146",
+        "chrome_major": "146",
+        "chrome_full_version": "146.0.7680.177",
+        "sec_ch_ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+        "sec_ch_ua_full_version_list": '"Chromium";v="146.0.7680.177", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="146.0.7680.177"',
+    },
+]
+
+# 是否启用 TLS 指纹轮换：每个 BrowserSession 从池里随机抽一个 bundle。
+# 默认开启（跨账号自然分散）；关闭则回到固定的 chrome146 旧行为。
+TLS_IMPRESONATE_ROTATION = True
+
+# 真实浏览器对纯 GET（fetch/xhr）不会携带 Content-Type；协议层历史上全带，
+# 属于明显的自动化标记。默认关闭（即 GET 不带 content-type）；需要复现旧抓包
+# 形态时改为 True。
+SEND_CONTENT_TYPE_ON_GET = False
 
 # ---------- 桌面 Chrome 画像 ----------
 BROWSER_FAMILY = "chrome"
-BROWSER_OS = "macOS"
+BROWSER_OS = "Windows"
 # OS 相关字段必须和 UA / Client Hints / JS navigator 三方一致。
-NAVIGATOR_PLATFORM = "MacIntel"
+NAVIGATOR_PLATFORM = "Win32"
 NAVIGATOR_VENDOR = "Google Inc."
-USER_AGENT_DATA_PLATFORM = "macOS"
+USER_AGENT_DATA_PLATFORM = "Windows"
 USER_AGENT = (
-    f"Mozilla/5.0 (Macintosh; Intel Mac OS X {MAC_OS_UA_VERSION}) "
+    f"Mozilla/5.0 (Windows NT {WINDOWS_NT_UA_VERSION}; Win64; x64) "
     f"AppleWebKit/{SAFARI_WEBKIT_VERSION} (KHTML, like Gecko) "
-    f"Chrome/{CHROME_FULL_VERSION} Safari/{SAFARI_WEBKIT_VERSION}"
+    f"Chrome/{CHROME_MAJOR}.0.0.0 Safari/{SAFARI_WEBKIT_VERSION}"
 )
 
-SEC_CH_UA = '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"'
-SEC_CH_UA_FULL_VERSION_LIST = '"Google Chrome";v="149.0.0.0", "Chromium";v="149.0.0.0", "Not)A;Brand";v="24.0.0.0"'
-SEC_CH_UA_PLATFORM = '"macOS"'
-SEC_CH_UA_PLATFORM_VERSION = '"15.7.0"'
+SEC_CH_UA = '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"'
+SEC_CH_UA_FULL_VERSION_LIST = '"Chromium";v="146.0.7680.177", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="146.0.7680.177"'
+SEC_CH_UA_PLATFORM = '"Windows"'
+SEC_CH_UA_PLATFORM_VERSION = '"19.0.0"'
 SEC_CH_UA_MOBILE = "?0"
-SEC_CH_UA_ARCH = '"arm"'
+SEC_CH_UA_ARCH = '"x86"'
 SEC_CH_UA_BITNESS = '"64"'
 SEC_CH_UA_MODEL = '""'
 SEND_CLIENT_HINTS = True
@@ -153,9 +198,9 @@ TIMEZONE_OFFSET_MINUTES = int(_LOCALE["timezone_offset_minutes"])
 TIMEZONE_NAME = _LOCALE["timezone_name"]
 
 # ---------- Sentinel / JS VM 环境 ----------
-SCREEN_WIDTH = 1680
-SCREEN_HEIGHT = 1050
-HARDWARE_CONCURRENCY = 6
+SCREEN_WIDTH = 1920
+SCREEN_HEIGHT = 1080
+HARDWARE_CONCURRENCY = 8
 JS_HEAP_SIZE_LIMIT = 4395630592
 DEVICE_MEMORY = 8
 
@@ -210,18 +255,17 @@ WINDOW_FEATURE_FLAGS = {
 REQUEST_TIMEOUT = 30
 
 # HAR 参考画像：Default-all-domains-1784468371563.json 解码 p[0]/p[2]/p[16] 得出。
-HAR_CAPTURE_BASE_PROFILE = {"screen_width": 1680, "screen_height": 1050, "hardware_concurrency": 6, "device_memory": 8, "js_heap_size_limit": 4395630592, "device_pixel_ratio": 2}
+HAR_CAPTURE_BASE_PROFILE = {"screen_width": 1920, "screen_height": 1080, "hardware_concurrency": 8, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1}
 
-# 常见 macOS Chrome 桌面画像池。同一 session 内保持不变；不同 session 随机分散。
+# 常见 Windows Chrome 桌面画像池。同一 session 内保持不变；不同 session 随机分散。
 # HAR_CAPTURE_BASE_PROFILE 只是候选之一，不全局固定。
 BROWSER_PROFILE_POOL = [
     HAR_CAPTURE_BASE_PROFILE,
-    {"screen_width": 1440, "screen_height": 900,  "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
-    {"screen_width": 1512, "screen_height": 982,  "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
-    {"screen_width": 1680, "screen_height": 1050, "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
-    {"screen_width": 1728, "screen_height": 1117, "hardware_concurrency": 10, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
-    {"screen_width": 1800, "screen_height": 1169, "hardware_concurrency": 10, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
-    {"screen_width": 2056, "screen_height": 1329, "hardware_concurrency": 12, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
+    {"screen_width": 1366, "screen_height": 768,  "hardware_concurrency": 4,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1},
+    {"screen_width": 1536, "screen_height": 864,  "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1.25},
+    {"screen_width": 1600, "screen_height": 900,  "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1},
+    {"screen_width": 1920, "screen_height": 1080, "hardware_concurrency": 12, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1},
+    {"screen_width": 2560, "screen_height": 1440, "hardware_concurrency": 16, "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 1},
 ]
 
 
@@ -267,9 +311,63 @@ def build_browser_environment(geo: dict | None = None, base_profile: dict | None
     return profile
 
 
-def pick_browser_profile(geo: dict | None = None) -> dict:
-    """为一个 BrowserSession 随机挑选稳定桌面画像；HAR 尺寸只是候选之一。"""
-    return build_browser_environment(geo)
+def _tls_bundle_profile(bundle: dict) -> dict:
+    """把 TLS bundle 的版本字段转成浏览器画像覆盖项。"""
+    major = str(bundle.get("chrome_major") or CHROME_MAJOR)
+    ua = (
+        f"Mozilla/5.0 (Windows NT {WINDOWS_NT_UA_VERSION}; Win64; x64) "
+        f"AppleWebKit/{SAFARI_WEBKIT_VERSION} (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/{SAFARI_WEBKIT_VERSION}"
+    )
+    return {
+        "impersonate": str(bundle.get("impersonate") or IMPERSONATE),
+        "chrome_major": major,
+        "chrome_full_version": str(bundle.get("chrome_full_version") or CHROME_FULL_VERSION),
+        "user_agent": ua,
+        "sec_ch_ua": str(bundle.get("sec_ch_ua") or SEC_CH_UA),
+        "sec_ch_ua_full_version_list": str(bundle.get("sec_ch_ua_full_version_list") or SEC_CH_UA_FULL_VERSION_LIST),
+    }
+
+
+def pick_tls_bundle() -> dict | None:
+    """
+    按 TLS_IMPRESONATE_ROTATION 从池里随机抽一个 TLS bundle。
+    返回 None 表示保持旧行为（模块级 chrome146 默认值）。
+    """
+    if not TLS_IMPRESONATE_ROTATION:
+        return None
+    if not TLS_IMPRESONATE_POOL:
+        return None
+    return dict(random.choice(TLS_IMPRESONATE_POOL))
+
+
+def impersonate_for_profile(profile: dict | None) -> str:
+    """
+    根据画像里的 chrome_major 推导对应的 curl_cffi impersonate 目标。
+    供复用已保存画像的会话（套餐查询/登录态复用等）保持 TLS 与画像版本一致。
+    """
+    if not isinstance(profile, dict):
+        return IMPERSONATE
+    major = str(profile.get("chrome_major") or "").strip()
+    if major:
+        for bundle in TLS_IMPRESONATE_POOL:
+            if str(bundle.get("chrome_major") or "") == major:
+                return str(bundle.get("impersonate") or IMPERSONATE)
+    return IMPERSONATE
+
+
+def pick_browser_profile(geo: dict | None = None, tls_bundle: dict | None = None) -> dict:
+    """为一个 BrowserSession 随机挑选稳定桌面画像；HAR 尺寸只是候选之一。
+
+    tls_bundle 为空时按 TLS_IMPRESONATE_ROTATION 自动抽取；bundle 的版本字段
+    会覆盖进画像，保证 UA / sec-ch-ua / client hints / curl_cffi impersonate 自洽。
+    """
+    if tls_bundle is None:
+        tls_bundle = pick_tls_bundle()
+    profile = build_browser_environment(geo)
+    if tls_bundle:
+        profile.update(_tls_bundle_profile(tls_bundle))
+    return profile
 
 
 def validate_browser_profile(profile: dict) -> list[str]:
@@ -282,8 +380,18 @@ def validate_browser_profile(profile: dict) -> list[str]:
             issues.append("Safari UA 不一致")
         if profile.get("send_client_hints"):
             issues.append("Safari 不应发送 Chromium Client Hints")
-    elif f"Chrome/{profile.get('chrome_full_version')}" not in ua:
-        issues.append("UA 与 chrome_full_version 不一致")
+    else:
+        ua_match = re.search(r"Chrome/(\d+)(?:\.\d+){0,3}", ua)
+        expected_major = str(profile.get("chrome_major") or "")
+        full_major = str(profile.get("chrome_full_version") or "").split(".", 1)[0]
+        if not ua_match or (expected_major and ua_match.group(1) != expected_major):
+            issues.append("UA 与 chrome_major 不一致")
+        if expected_major and full_major and expected_major != full_major:
+            issues.append("chrome_major 与 chrome_full_version 不一致")
+        sec_ch_ua = str(profile.get("sec_ch_ua") or "")
+        sec_major_match = re.search(r'"Google Chrome";v="(\d+)"', sec_ch_ua) if "Google Chrome" in sec_ch_ua else None
+        if expected_major and sec_major_match and sec_major_match.group(1) != expected_major:
+            issues.append("sec-ch-ua 与 chrome_major 不一致")
     if profile.get("browser_os") == "macOS":
         if "Macintosh; Intel Mac OS X" not in ua:
             issues.append("macOS 画像但 UA 不是 Macintosh")
@@ -291,6 +399,13 @@ def validate_browser_profile(profile: dict) -> list[str]:
             issues.append("macOS 画像但 navigator.platform 不是 MacIntel")
         if "macOS" not in str(profile.get("sec_ch_ua_platform") or ""):
             issues.append("macOS 画像但 sec-ch-ua-platform 不是 macOS")
+    elif profile.get("browser_os") == "Windows":
+        if "Windows NT" not in ua:
+            issues.append("Windows 画像但 UA 不是 Windows")
+        if str(profile.get("navigator_platform") or "") != "Win32":
+            issues.append("Windows 画像但 navigator.platform 不是 Win32")
+        if "Windows" not in str(profile.get("sec_ch_ua_platform") or ""):
+            issues.append("Windows 画像但 sec-ch-ua-platform 不是 Windows")
     if not profile.get("navigator_language"):
         issues.append("navigator_language 为空")
     languages = profile.get("navigator_languages") or []
@@ -300,4 +415,4 @@ def validate_browser_profile(profile: dict) -> list[str]:
     return issues
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'BROWSER_LOCALE_PROFILE': 'str', 'AUTO_BROWSER_LOCALE_FROM_IP': 'bool', 'IP_GEO_TIMEOUT': 'float', 'REJECT_CLOUD_PROXY': 'bool'})
+apply_env_overrides(globals(), {'BROWSER_LOCALE_PROFILE': 'str', 'AUTO_BROWSER_LOCALE_FROM_IP': 'bool', 'IP_GEO_TIMEOUT': 'float', 'REJECT_CLOUD_PROXY': 'bool', 'TLS_IMPRESONATE_ROTATION': 'bool', 'SEND_CONTENT_TYPE_ON_GET': 'bool'})

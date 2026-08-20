@@ -17,6 +17,7 @@ from config import twofa as _twofa_cfg
 from config import email as _email_cfg
 from config import roxybrowser as _roxy_cfg
 from config import openai_protocol as _protocol_cfg
+from config import proxy as _proxy_cfg
 from core.session import BrowserSession
 from core.chatgpt_auth import get_providers, get_csrf_token, signin_openai
 from core.openai_auth import (
@@ -138,7 +139,7 @@ def prepare_registration_inputs() -> tuple[str, str, str]:
     name = REGISTER_NAME
     birthday = generate_random_birthday()
 
-    # 邮箱：留空 + USE_EMAIL_SERVICE=True 时从 Outlook 池领取
+    # 邮箱：留空 + USE_EMAIL_SERVICE=True 时由当前邮箱 Provider 自动领取
     if not email:
         if _email_cfg.USE_EMAIL_SERVICE:
             email = acquire_email()
@@ -235,8 +236,18 @@ def run_registration(
             f"不支持的 REGISTRATION_DRIVER={driver_mode!r}，可选 protocol / roxy / cloak / browser_use / skyvern"
         )
 
-    # 创建浏览器会话（proxy=None 时自动从 config.PROXY_POOL 随机抽一个）
-    session = BrowserSession(proxy=proxy)
+    # 自动模式先确认真实出口，再创建会话；否则 BrowserSession 只会随机拿到共享网关入口。
+    selected_proxy = proxy
+    if selected_proxy is None:
+        from config import proxy as _proxy_cfg
+        selected_proxy = _proxy_cfg.pick_healthy_proxy(probe=True)
+        if _proxy_cfg.proxy_required() and not selected_proxy:
+            detail = _proxy_cfg.last_cliproxy_error()
+            suffix = f"：{detail}" if detail else ""
+            raise RuntimeError(f"没有可验证的真实代理出口，已停止注册{suffix}")
+    session = BrowserSession(proxy=selected_proxy)
+    # 后续 403 确认必须跟踪实际使用的代理。
+    selected_proxy = session.proxy
 
     # 从代理 URL 中抽取 sid 段做日志，避免把账号密码完整打印
     proxy_label = "无"
@@ -261,7 +272,71 @@ def run_registration(
     create_acknowledged = False
     try:
         # 网络预检必须在 signin/follow_authorize 之前完成；预检不带邮箱，不会触发 OTP。
-        network_preflight(session)
+        preflight_attempt = 0
+        proxy_pool_rotation = proxy is None and bool(
+            _proxy_cfg.cliproxy_pool_enabled()
+            or getattr(_proxy_cfg, "PROXY_POOL", None)
+        )
+        max_preflight_attempts = max(
+            2,
+            int(getattr(_proxy_cfg, "PROXY_SWITCH_MAX", 3) or 3),
+        )
+        while True:
+            try:
+                if proxy_pool_rotation and session.proxy:
+                    warmup_seconds = max(
+                        0.0,
+                        float(getattr(_proxy_cfg, "CLIPROXY_PROXY_WARMUP_SECONDS", 3.0) or 0.0),
+                    )
+                    if warmup_seconds:
+                        logging.getLogger(__name__).info(
+                            "[Cliproxy] 等待出口稳定 %.1fs 后开始网络预检",
+                            warmup_seconds,
+                        )
+                        time.sleep(warmup_seconds)
+                network_preflight(session)
+                break
+            except Exception as preflight_error:
+                preflight_attempt += 1
+                is_proxy_transport_error = bool(
+                    _proxy_cfg.is_proxy_lag_error(preflight_error)
+                )
+                if (
+                    not is_proxy_transport_error
+                    or preflight_attempt >= max_preflight_attempts
+                    or not proxy_pool_rotation
+                ):
+                    raise
+                expected_country = _proxy_cfg.cliproxy_expected_country()
+                try:
+                    session.close()
+                except Exception:
+                    pass
+                _proxy_cfg.ban_proxy(
+                    selected_proxy,
+                    reason=f"proxy_transport_error: {str(preflight_error)[:120]}",
+                )
+                if expected_country:
+                    retry_proxy = _proxy_cfg.pick_healthy_country_proxy(
+                        expected_country,
+                        exclude=[selected_proxy] if selected_proxy else None,
+                        max_candidates=8,
+                    )
+                else:
+                    retry_proxy = _proxy_cfg.pick_healthy_proxy(
+                        exclude=[selected_proxy] if selected_proxy else None,
+                        max_candidates=8,
+                    )
+                if not retry_proxy:
+                    raise
+                selected_proxy = retry_proxy
+                session = BrowserSession(proxy=selected_proxy)
+                logging.getLogger(__name__).warning(
+                    "[Cliproxy] 当前出口确认不可用，切换 %s 新出口重试 (%s/%s)",
+                    expected_country,
+                    preflight_attempt,
+                    max_preflight_attempts,
+                )
         human_delay("navigate")
 
         # 根据 2026-07-19 HAR 补齐匿名态 ChatGPT 首屏/模型预热链路。
@@ -302,7 +377,7 @@ def run_registration(
         # Sentinel Token 不提前生成；等 OTP 到手后紧贴 validate 请求生成，
         # 避免等待邮箱期间 challenge 过期或与重新发送后的状态不一致。
 
-        # 等待验证码：USE_EMAIL_SERVICE=True 时自动从 Outlook 取件，否则人工输入。
+        # 等待验证码：自动取码服务开启时轮询邮箱，否则仅 CLI 交互输入。
         # 如果验证码错误/过期，自动重新发送并重新取最新验证码。
         validate_result = None
         max_otp_attempts = 3
@@ -507,6 +582,16 @@ def run_registration(
 
         logger.info(f"[完成] {email}，账号ID={account_id}，Token={access_token[:16]}...")
 
+        # ==================== 阶段8.5: 官方 Plus 页面交接 ====================
+        # 仅打开官方页面，不在后台接触卡号、client_secret 或自动提交订阅。
+        billing_handoff = {"accepted": False, "skipped": True}
+        try:
+            from core.billing_handoff import enqueue_billing_handoff
+            billing_handoff = enqueue_billing_handoff(account_id)
+        except Exception as exc:
+            billing_handoff = {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}
+            logger.warning("[Plus交接] 排队失败: %s", billing_handoff["error"])
+
         # ==================== 阶段9: 后置自动触发 flow ====================
         # 只有走完回调、拿到 token 并保存成功的账号，才会触发 flow。
         # flow 请求不影响账号保存状态，但会记录结果并参与批量统计。
@@ -544,7 +629,7 @@ def run_registration(
 
         return {"success": task_success, "email": email, "account_id": account_id,
                 "access_token": access_token, "totp_secret": totp_secret,
-                "flow": flow_result, "codex": codex_result,
+                "flow": flow_result, "codex": codex_result, "billing_handoff": billing_handoff,
                 "error": task_error}
 
     except Exception as e:
@@ -603,7 +688,7 @@ def main():
         sys.exit(1)
 
     if args.workers > 1 and not _email_cfg.USE_EMAIL_SERVICE:
-        logger.error("多线程注册需要启用 Outlook 自动取件；请开启 USE_EMAIL_SERVICE 或改用 --workers 1")
+        logger.error("多线程注册需要启用自动邮箱取件；请开启 USE_EMAIL_SERVICE 或改用 --workers 1")
         sys.exit(1)
 
     if args.workers > args.count:

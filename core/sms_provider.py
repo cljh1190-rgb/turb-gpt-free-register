@@ -8,7 +8,8 @@
     3. complete() / cancel()  setStatus 标记完成(6) / 取消(8)
 
 当前支持：
-    - GrizzlySMS：GET 文本接口，文档 https://api.grizzlysms.com
+    - GrizzlySMS：GET handler_api，文档 https://grizzlysms.com/cn/docs
+    - HeroSMS：GET handler_api（sms-activate 兼容），文档 https://hero-sms.com/cn/api
     - L：本地 JSON 管理接口，文档 L_API.md
     - H：本地 JSON 管理接口，文档 H_API.md
 
@@ -31,13 +32,32 @@ from config import IMPERSONATE
 
 logger = logging.getLogger(__name__)
 
-# GrizzlySMS 规则：号码取出后 2 分钟内不允许取消（防薅号）。
+# sms-activate 兼容站常见规则：号码取出后约 2 分钟内不允许取消（防薅号）。
 # 这里留 5 秒缓冲，时间到了再发 setStatus=8。
 _MIN_CANCEL_DELAY = 125
 
 # 记录每个 activation_id 的取号时间，供 cancel() 判断是否要等。
 # 用模块级 dict 而不是改 acquire_number 返回值，保持向后兼容。
 _ACQUIRED_AT: dict[str, float] = {}
+
+# 走 GET handler_api.php（getNumber/getStatus/setStatus）的通道
+_ACTIVATE_STYLE_PROVIDERS = frozenset({
+    "grizzly",
+    "hero",
+    "herosms",
+    "hero-sms",
+    "hero_sms",
+    "smsactivate",
+    "sms-activate",
+})
+
+_DEFAULT_API_BASE = {
+    "grizzly": "https://api.grizzlysms.com/stubs/handler_api.php",
+    "hero": "https://hero-sms.com/stubs/handler_api.php",
+    "herosms": "https://hero-sms.com/stubs/handler_api.php",
+    "hero-sms": "https://hero-sms.com/stubs/handler_api.php",
+    "hero_sms": "https://hero-sms.com/stubs/handler_api.php",
+}
 
 
 class SmsProviderError(RuntimeError):
@@ -66,37 +86,127 @@ def _provider() -> str:
     return str(getattr(_cfg, "SMS_PROVIDER", "grizzly") or "grizzly").strip().lower()
 
 
-def _request_grizzly(http: CurlSession, params: dict) -> str:
+def _provider_label() -> str:
+    p = _provider()
+    if p in ("hero", "herosms", "hero-sms", "hero_sms"):
+        return "HeroSMS"
+    if p == "l":
+        return "L"
+    if p == "h":
+        return "H"
+    if p in ("smsactivate", "sms-activate"):
+        return "SMS-Activate"
+    return "GrizzlySMS"
+
+
+def _is_activate_style() -> bool:
+    return _provider() in _ACTIVATE_STYLE_PROVIDERS or _provider() not in ("l", "h")
+
+
+def _sms_api_base() -> str:
+    """优先用配置的 SMS_API_BASE；为空时按通道给默认基址。"""
+    configured = str(getattr(_cfg, "SMS_API_BASE", "") or "").strip()
+    if configured:
+        return configured
+    return _DEFAULT_API_BASE.get(_provider(), _DEFAULT_API_BASE["grizzly"])
+
+
+def _normalize_activate_response_text(status_code: int, raw: str) -> str:
     """
-    发一个 GrizzlySMS API 请求，返回去空白的响应文本。
+    统一 sms-activate 系响应：
+      - Grizzly 多为纯文本 BAD_KEY / ACCESS_NUMBER:...
+      - HeroSMS 错误常见 JSON：{"title":"BAD_KEY","details":"Unauthorized"}
+    返回用于后续分支判断的纯文本错误码或成功原文。
+    """
+    text = (raw or "").strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            data = json.loads(text)
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            title = str(data.get("title") or data.get("error") or data.get("code") or "").strip()
+            details = str(data.get("details") or data.get("message") or "").strip()
+            info = data.get("info") if isinstance(data.get("info"), dict) else {}
+            field = str((info or {}).get("field") or "").strip()
+            upper = title.upper()
+            detail_upper = details.upper()
+            # Hero: {"title":"BAD_KEY"} / 401 Unauthorized
+            if upper in (
+                "BAD_KEY",
+                "NO_BALANCE",
+                "NO_NUMBERS",
+                "BAD_ACTION",
+                "BAD_SERVICE",
+                "BAD_STATUS",
+                "NO_ACTIVATION",
+                "SERVICE_UNAVAILABLE_REGION",
+            ):
+                return upper
+            if "BAD_KEY" in upper or "UNAUTHORIZED" in detail_upper or status_code == 401:
+                return "BAD_KEY"
+            if "NO_BALANCE" in upper or "NO_BALANCE" in detail_upper:
+                return "NO_BALANCE"
+            if "NO_NUMBERS" in upper or "NO_NUMBERS" in detail_upper:
+                return "NO_NUMBERS"
+            if upper == "UNPROCESSABLE_ENTITY" and field == "api_key":
+                return "BAD_KEY"
+            if title:
+                return f"{title}:{details}".strip(":") if details else title
+    if status_code == 401:
+        return "BAD_KEY"
+    return text
+
+
+def _raise_if_activate_error(text: str, *, http_status: int | None = None) -> None:
+    """识别公共错误码并抛对应异常。"""
+    code = (text or "").strip()
+    label = _provider_label()
+    if code == "BAD_KEY":
+        raise SmsProviderError(f"{label} API key 无效（BAD_KEY）")
+    if code == "NO_BALANCE":
+        raise SmsNoBalanceError(f"{label} 余额不足（NO_BALANCE），请充值")
+    if code == "NO_NUMBERS":
+        raise SmsNoNumbersError(f"{label} 暂无可用号码（NO_NUMBERS）")
+    if code == "SERVICE_UNAVAILABLE_REGION":
+        raise SmsProviderError(f"{label} 地区受限（SERVICE_UNAVAILABLE_REGION），请换 IP")
+    if code in ("BAD_ACTION", "BAD_SERVICE", "BAD_STATUS"):
+        raise SmsProviderError(f"{label} 请求参数错误：{code}")
+    if code == "NO_ACTIVATION":
+        raise SmsProviderError(f"{label} 激活 ID 不存在（NO_ACTIVATION）")
+    if code.startswith("The service is prohibited"):
+        raise SmsProviderError(f"{label} 该服务被平台禁售：{code}")
+    # 非 2xx 且不是已知成功前缀时，当作硬错误
+    if http_status is not None and http_status >= 400:
+        if not (
+            code.startswith("ACCESS_")
+            or code.startswith("STATUS_")
+            or code in ("OK", "ACCESS_READY", "ACCESS_RETRY_GET", "ACCESS_ACTIVATION", "ACCESS_CANCEL")
+        ):
+            raise SmsProviderError(f"{label} HTTP {http_status}: {code[:200]}")
+
+
+def _request_activate(http: CurlSession, params: dict) -> str:
+    """
+    发一个 sms-activate 兼容 API 请求（Grizzly / HeroSMS 等），返回去空白的响应文本。
     统一识别公共错误码并抛对应异常。
     """
-    base_params = {"api_key": _cfg.SMS_API_KEY}
+    api_key = str(getattr(_cfg, "SMS_API_KEY", "") or "").strip()
+    if not api_key:
+        raise SmsProviderError(f"{_provider_label()} API key 为空，请在 .env 填写 SMS_API_KEY")
+
+    base_params = {"api_key": api_key}
     base_params.update(params)
-    resp = http.get(_cfg.SMS_API_BASE, params=base_params)
-    if resp.status_code != 200:
-        raise SmsProviderError(
-            f"GrizzlySMS HTTP {resp.status_code}: {(resp.text or '')[:200]}"
-        )
-    text = (resp.text or "").strip()
-
-    # 公共错误码（任何 action 都可能返回）
-    if text == "BAD_KEY":
-        raise SmsProviderError("接码平台 API key 无效（BAD_KEY）")
-    if text == "NO_BALANCE":
-        raise SmsNoBalanceError("接码平台余额不足（NO_BALANCE），请充值")
-    if text == "NO_NUMBERS":
-        raise SmsNoNumbersError("接码平台暂无可用号码（NO_NUMBERS）")
-    if text == "SERVICE_UNAVAILABLE_REGION":
-        raise SmsProviderError("接码平台地区受限（SERVICE_UNAVAILABLE_REGION），请换 IP")
-    if text in ("BAD_ACTION", "BAD_SERVICE", "BAD_STATUS"):
-        raise SmsProviderError(f"接码平台请求参数错误：{text}")
-    if text == "NO_ACTIVATION":
-        raise SmsProviderError("激活 ID 不存在（NO_ACTIVATION）")
-    if text.startswith("The service is prohibited"):
-        raise SmsProviderError(f"该服务被平台禁售：{text}")
-
+    base = _sms_api_base()
+    resp = http.get(base, params=base_params)
+    text = _normalize_activate_response_text(resp.status_code, resp.text or "")
+    _raise_if_activate_error(text, http_status=resp.status_code)
     return text
+
+
+def _request_grizzly(http: CurlSession, params: dict) -> str:
+    """兼容旧名：内部转 _request_activate。"""
+    return _request_activate(http, params)
 
 
 def _l_url(path: str) -> str:
@@ -551,7 +661,7 @@ def _do_cancel_sync(activation_id: str, http_factory) -> None:
         if elapsed < _MIN_CANCEL_DELAY:
             wait = _MIN_CANCEL_DELAY - elapsed
             logger.info(
-                f"[SMS] 取消等待 GrizzlySMS 2 分钟限制：activation_id={activation_id}，"
+                f"[SMS] 取消等待 {_provider_label()} 约 2 分钟限制：activation_id={activation_id}，"
                 f"还需等 {wait:.0f}s..."
             )
             time.sleep(wait)
@@ -584,9 +694,9 @@ def cancel(activation_id: str, http: CurlSession | None = None, background: bool
     """
     取消激活（status=8），释放号码避免白扣费。
 
-    GrizzlySMS 规则：号码取出后约 2 分钟内不允许取消。本函数默认 background=True，
-    把"等 2 分钟+取消"放到后台守护线程里执行，主流程立刻返回继续走（如换下一个号），
-    避免被这 2 分钟阻塞。
+    sms-activate 兼容站（Grizzly/Hero 等）常见规则：号码取出后约 2 分钟内不允许取消。
+    本函数默认 background=True，把"等 2 分钟+取消"放到后台守护线程里执行，主流程立刻
+    返回继续走（如换下一个号），避免被这 2 分钟阻塞。
 
     background=False 时同步等够时间再返回（少数场景需要确认取消完成时用）。
 

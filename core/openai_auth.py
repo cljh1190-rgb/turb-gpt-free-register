@@ -7,6 +7,7 @@ OpenAI Auth 模块
 import json
 import logging
 import time
+from urllib.parse import urljoin, urlparse
 
 from core.session import BrowserSession
 from core.sentinel import (
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 class EmailOtpInvalidError(RuntimeError):
     """邮箱验证码无效/过期，可重新发送后重试。"""
+
+
+class AuthStateInvalidError(RuntimeError):
+    """OpenAI 登录事务已失效，需要新建会话后重新开始。"""
 
 
 class AccountUnusableError(Exception):
@@ -172,8 +177,10 @@ def network_preflight(session: BrowserSession) -> None:
             try:
                 logger.info(f"[预检] {label} ({attempt}/{_FOLLOW_AUTH_MAX_ATTEMPTS})")
                 resp = fn()
-                if getattr(resp, "status_code", 0) >= 400:
-                    raise RuntimeError(f"{label} status={resp.status_code}, body={(getattr(resp, 'text', '') or '')[:180]}")
+                status = int(getattr(resp, "status_code", 0) or 0)
+                # 预检只判断代理/TLS/网络是否连通。Cloudflare 对协议客户端返回
+                # 401/403 仍说明目标站可达，不能据此拉黑真实浏览器可用的出口。
+                logger.info("[预检] %s 链路已连通 status=%s", label, status or "unknown")
                 break
             except Exception as exc:
                 last_exc = exc
@@ -198,15 +205,39 @@ def follow_authorize(session: BrowserSession, authorize_url: str) -> str:
         session: 浏览器会话
         authorize_url: 从步骤3获取的 authorize URL
     """
-    headers = session.get_auth_navigate_headers(referer="https://chatgpt.com/")
-
     last_exc: Exception | None = None
     for attempt in range(1, _FOLLOW_AUTH_MAX_ATTEMPTS + 1):
         try:
             logger.info(f"[步骤4] 跟随 authorize URL 重定向 (尝试 {attempt}/{_FOLLOW_AUTH_MAX_ATTEMPTS})...")
-            resp = session.get(authorize_url, headers=headers, allow_redirects=True)
-            resp.raise_for_status()
-            final_url = str(getattr(resp, "url", "") or "")
+            current_url = str(authorize_url or "").strip()
+            referer = "https://chatgpt.com/"
+            visited: set[str] = set()
+            final_url = current_url
+            for hop in range(12):
+                if not current_url or current_url in visited:
+                    raise RuntimeError(f"[步骤4] authorize 重定向循环，最后 URL={current_url[:180]}")
+                visited.add(current_url)
+                parsed = urlparse(current_url)
+                target_origin = f"{parsed.scheme}://{parsed.netloc}"
+                headers = session.get_auth_navigate_headers(
+                    referer=referer,
+                    target_origin=target_origin,
+                )
+                resp = session.get(current_url, headers=headers, allow_redirects=False)
+                status = int(getattr(resp, "status_code", 0) or 0)
+                location = str(getattr(resp, "headers", {}).get("location") or "").strip()
+                if status in {301, 302, 303, 307, 308} and location:
+                    referer, current_url = current_url, urljoin(current_url, location)
+                    final_url = current_url
+                    continue
+                final_url = current_url
+                if status < 200 or status >= 400:
+                    body = (getattr(resp, "text", "") or "").strip().replace("\n", " ")[:180]
+                    raise RuntimeError(
+                        f"[步骤4] authorize 第 {hop + 1} 跳 HTTP {status} "
+                        f"url={current_url[:180]} body={body}"
+                    )
+                break
             if "/api/accounts/user/register" in final_url or "/create-account/password" in final_url:
                 raise RuntimeError(f"[步骤4] 落入旧密码注册路径，已拒绝继续烧邮箱: {final_url}")
             logger.info(f"[步骤4] 重定向完成, 最终URL: {final_url}")
@@ -459,7 +490,7 @@ def validate_email_otp(session: BrowserSession, code: str, sentinel_header: str 
     """
     url = "https://auth.openai.com/api/accounts/email-otp/validate"
 
-    headers = session.get_auth_headers(referer="https://auth.openai.com/email-verification")
+    headers = session.get_auth_headers(referer="https://auth.openai.com/email-verification", method="POST")
     if sentinel_header:
         headers["openai-sentinel-token"] = sentinel_header
     if so_header:
@@ -468,7 +499,7 @@ def validate_email_otp(session: BrowserSession, code: str, sentinel_header: str 
 
     body = json.dumps({"code": code})
 
-    logger.info(f"[步骤10] 提交邮箱验证码: {code}")
+    logger.info("[步骤10] 提交邮箱验证码")
     resp = session.post(url, headers=headers, data=body)
 
     if resp.status_code != 200:
@@ -481,6 +512,13 @@ def validate_email_otp(session: BrowserSession, code: str, sentinel_header: str 
                 f"账号已废弃（{err_code}），邮箱不可再用", error_code=err_code,
             )
         low = (resp.text or '').lower()
+        if err_code == "invalid_state" or "sign-in session is no longer valid" in low:
+            # Do not treat this as a bad OTP.  Retrying in the same auth
+            # transaction only produces more invalid_state responses and can
+            # consume valid mailbox codes; the caller must start a fresh flow.
+            raise AuthStateInvalidError(
+                "OpenAI 登录会话已失效（invalid_state），需要重新开始授权流程"
+            )
         if resp.status_code in (400, 401, 422) and any(k in low for k in (
             'invalid', 'incorrect', 'expired', 'code', 'otp', 'verification',
             '验证码', '認証コード', '確認コード', 'コード'
@@ -512,7 +550,7 @@ def create_account(session: BrowserSession, name: str, birthday: str, sentinel_h
     """
     url = "https://auth.openai.com/api/accounts/create_account"
 
-    headers = session.get_auth_headers(referer="https://auth.openai.com/about-you")
+    headers = session.get_auth_headers(referer="https://auth.openai.com/about-you", method="POST")
     headers["openai-sentinel-token"] = sentinel_header
     if so_header:
         headers["openai-sentinel-so-token"] = so_header

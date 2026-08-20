@@ -209,6 +209,83 @@ def _maybe_click_passwordless_after_email(driver, email: str, timeout: int = 18)
         logger.info("[Codex][Browser] 已点击一次性验证码入口，未立即检测到 OTP 页，继续后续 OTP 轮询")
 
 
+def _looks_codex_past_login(driver) -> bool:
+    """已越过登录邮箱步骤（OTP / 手机 / workspace / consent / callback）。"""
+    try:
+        url = str(driver.current_url or "").lower()
+    except Exception:
+        url = ""
+    if _is_callback_url(url) or _is_email_verification_page(driver):
+        return True
+    if any(x in url for x in (
+        "email-verification",
+        "add-phone",
+        "phone-verification",
+        "about-you",
+        "workspace",
+        "consent",
+        "organization",
+        "select-org",
+    )):
+        return True
+    try:
+        if _has_strict_add_phone_form(driver) or _is_phone_code_page(driver):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _looks_codex_need_login(driver) -> bool:
+    """仍停在登录/授权入口，必须填邮箱，不能当成已登录跳过。"""
+    try:
+        url = str(driver.current_url or "").lower()
+    except Exception:
+        url = ""
+    if _looks_codex_past_login(driver):
+        return False
+    if any(x in url for x in ("/log-in", "/login", "/sign-in", "/sign_in", "oauth/authorize", "identifier")):
+        return True
+    # 有可见邮箱框也算需要登录
+    try:
+        from core.roxy_registration import _find_visible_email_input_js
+        if _find_visible_email_input_js(driver):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _wait_codex_auth_page_ready(driver, timeout: int = 25) -> None:
+    """oauth/authorize 常先空白再跳 log-in；等邮箱框或明确下一步出现。"""
+    end = time.time() + timeout
+    last_url = ""
+    while time.time() < end:
+        try:
+            url = str(driver.current_url or "")
+        except Exception:
+            url = ""
+        if url != last_url:
+            logger.info("[Codex][Browser] 授权页就绪检测：url=%s", url[:180] or "-")
+            last_url = url
+        if _looks_codex_past_login(driver):
+            return
+        try:
+            from core.roxy_registration import _find_visible_email_input_js
+            if _find_visible_email_input_js(driver):
+                return
+        except Exception:
+            pass
+        # 已到 log-in 也算就绪，继续找输入框
+        if "/log-in" in url.lower() or "/login" in url.lower():
+            time.sleep(0.4)
+            # 再给一点 hydration 时间
+            if time.time() + 3 >= end:
+                return
+            continue
+        time.sleep(0.4)
+
+
 def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None:
     otp_after_ts = time.time()
     logger.info("[Codex][Browser] 打开授权地址")
@@ -217,19 +294,59 @@ def _fill_email_and_otp(driver, email: str, otp_provider, auth_url: str) -> None
     human_delay("navigate")
     logger.info("[Codex][Browser] 授权页加载完成，检查是否需要邮箱登录")
     _maybe_accept(driver)
+    _wait_codex_auth_page_ready(driver, timeout=25)
 
     # 可能已经处于账号选择/授权页；如果有邮箱输入框则完整登录。
     # 非日本出口时按钮文案/顺序会变，不能按可见文字点“继续”，否则可能误点 Google。
-    try:
-        _type_email_address(driver, email, timeout=12)
-        logger.info("[Codex][Browser] 已填写邮箱：%s", email)
-        human_delay("form")
-        _submit_email_step(driver)
-        logger.info("[Codex][Browser] 已提交邮箱，等待邮箱 OTP 页面")
-        _maybe_click_passwordless_after_email(driver, email, timeout=18)
-    except Exception as exc:
-        logger.info("[Codex][Browser] 未检测到邮箱输入框，可能已登录或进入下一步：%s", str(exc)[:120])
-        return
+    # 关键：找不到邮箱框时绝不能静默 return——Luke 补跑就是因此空等 callback 直到 /log-in 超时。
+    last_exc: Exception | None = None
+    for login_try in range(1, 4):
+        if _looks_codex_past_login(driver):
+            logger.info("[Codex][Browser] 页面已越过登录步骤，跳过填邮箱：url=%s", str(getattr(driver, "current_url", "") or "")[:160])
+            return
+        try:
+            _type_email_address(driver, email, timeout=22 if login_try == 1 else 16)
+            logger.info("[Codex][Browser] 已填写邮箱：%s（第 %s 次）", email, login_try)
+            human_delay("form")
+            _submit_email_step(driver)
+            logger.info("[Codex][Browser] 已提交邮箱，等待邮箱 OTP 页面")
+            _maybe_click_passwordless_after_email(driver, email, timeout=18)
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            cur = str(getattr(driver, "current_url", "") or "")
+            if _looks_codex_past_login(driver):
+                logger.info(
+                    "[Codex][Browser] 填邮箱异常但已进入后续步骤，继续：%s url=%s",
+                    str(exc)[:120],
+                    cur[:160],
+                )
+                last_exc = None
+                break
+            logger.warning(
+                "[Codex][Browser] 第 %s/3 次填邮箱失败，将重开授权页：%s | url=%s",
+                login_try,
+                str(exc)[:160],
+                cur[:180],
+            )
+            if login_try >= 3:
+                break
+            try:
+                driver.get(auth_url)
+                human_delay("navigate")
+                _maybe_accept(driver)
+                _wait_codex_auth_page_ready(driver, timeout=20)
+            except Exception as reopen_exc:
+                logger.warning("[Codex][Browser] 重开授权页失败：%s", str(reopen_exc)[:140])
+    if last_exc is not None:
+        cur = str(getattr(driver, "current_url", "") or "")
+        raise RuntimeError(
+            f"Codex 授权页未能完成邮箱登录（最后 URL={cur[:180]}）：{type(last_exc).__name__}: {str(last_exc)[:200]}"
+        ) from last_exc
+    if _looks_codex_need_login(driver) and not _is_email_verification_page(driver):
+        # 提交后仍停在 log-in 且无 OTP：再等一下 passwordless / SPA 跳转
+        _maybe_click_passwordless_after_email(driver, email, timeout=12)
 
     # 提交邮箱后不再执行任何全局“继续/授权/分支”兜底点击；后续只等待验证码页。
     # 避免页面已进入 OAuth consent 时误点授权按钮。
@@ -1131,25 +1248,46 @@ def _do_phone_verification_if_present(driver) -> None:
 
 def _finish_consent_workspace(driver) -> str:
     """点击 Codex consent/workspace 页面里的继续/允许按钮，直到 callback。"""
-    end = time.time() + int(_roxy_cfg.ROXY_CODEX_CALLBACK_TIMEOUT)
+    total = int(getattr(_roxy_cfg, "ROXY_CODEX_CALLBACK_TIMEOUT", 180) or 180)
+    end = time.time() + total
+    login_stuck_since: float | None = None
     while time.time() < end:
         callback = _extract_callback_url_from_any_window(driver)
         if callback:
             return callback
         current = str(driver.current_url or "")
+        # 若仍卡在登录页，说明前面登录被跳过——短等后失败，避免空等数分钟
+        if _looks_codex_need_login(driver) and not _looks_codex_past_login(driver):
+            if login_stuck_since is None:
+                login_stuck_since = time.time()
+                logger.warning(
+                    "[Codex][Browser] consent/callback 阶段仍停在登录页，判定登录未完成：url=%s",
+                    current[:180],
+                )
+            elif time.time() - login_stuck_since >= 12:
+                raise RuntimeError(
+                    f"Codex 仍停在登录页，未进入授权/callback（登录步骤可能被跳过），最后 URL={current[:180]}"
+                )
+        else:
+            login_stuck_since = None
         clicked = False
-        for selectors in [
-            ["//button[contains(., 'Allow')]", "//button[contains(., 'Authorize')]", "//button[contains(., 'Continue')]"],
-            ["//button[contains(., 'Select')]", "//button[contains(., 'Use workspace')]", "//button[contains(., 'Confirm')]"],
-            ["//button[contains(., '允许')]", "//button[contains(., '授权')]", "//button[contains(., '继续')]", "//button[contains(., '确认')]"],
-            ["button[type='submit']"],
-        ]:
-            if _click_if_present(driver, selectors, timeout=2):
-                clicked = True
-                human_delay("form")
-                break
+        # 登录页不要乱点 Continue/Allow，容易误点
+        if not _looks_codex_need_login(driver):
+            for selectors in [
+                ["//button[contains(., 'Allow')]", "//button[contains(., 'Authorize')]", "//button[contains(., 'Continue')]"],
+                ["//button[contains(., 'Select')]", "//button[contains(., 'Use workspace')]", "//button[contains(., 'Confirm')]"],
+                ["//button[contains(., '允许')]", "//button[contains(., '授权')]", "//button[contains(., '继续')]", "//button[contains(., '确认')]"],
+                ["button[type='submit']"],
+            ]:
+                if _click_if_present(driver, selectors, timeout=2):
+                    clicked = True
+                    human_delay("form")
+                    break
         if not clicked:
             time.sleep(0.8)
+    final_url = str(getattr(driver, "current_url", "") or "")
+    if _looks_codex_need_login(driver):
+        raise RuntimeError(f"等待 Codex callback 超时（仍停在登录页，登录未完成），最后 URL={final_url[:180]}")
     return _wait_for_callback(driver, timeout=5)
 
 
@@ -1226,20 +1364,29 @@ def _run_roxy_codex_oauth_once(
     try:
         auth_source = proto._codex_auth_url_source()
         code_verifier = None
+        cpa_auth = None
+        sub2_auth = None
         if auth_source == "cpa":
-            cpa_auth = proto._request_cpa_authorize_url()
+            cpa_auth = proto._request_cpa_authorize_url(allow_local_fallback=True)
             state = cpa_auth["state"]
             auth_url = cpa_auth["auth_url"]
-            logger.info("[Codex][Browser] 当前使用 CPA 授权地址: %s", auth_url)
+            # CPA 本机未开时 _request_cpa_authorize_url 会回退 local PKCE
+            if str(cpa_auth.get("origin") or "") == "local" or cpa_auth.get("code_verifier"):
+                auth_source = "local"
+                code_verifier = cpa_auth.get("code_verifier")
+                logger.warning("[Codex][Browser] CPA 不可达，已切到本地 PKCE 授权: %s", auth_url)
+            else:
+                logger.info("[Codex][Browser] 当前使用 CPA 授权地址: %s", auth_url)
         elif auth_source == "sub2":
             sub2_auth = proto._request_sub2_authorize_url()
             state = sub2_auth["state"]
             auth_url = sub2_auth["auth_url"]
             logger.info("[Codex][Browser] 当前使用 sub2 授权地址: %s", auth_url)
         elif auth_source == "local":
-            code_verifier, code_challenge = proto._generate_pkce()
-            state = proto._generate_state()
-            auth_url = proto._build_authorize_url(state, code_challenge, prompt="login")
+            local_auth = proto._request_local_authorize_url()
+            code_verifier = local_auth["code_verifier"]
+            state = local_auth["state"]
+            auth_url = local_auth["auth_url"]
             logger.info("[Codex][Browser] 当前使用本地 PKCE 授权地址: %s", auth_url)
         else:
             raise RuntimeError(f"[Codex][Browser] 不支持的 CODEX_AUTH_URL_SOURCE={auth_source!r}")

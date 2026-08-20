@@ -6,7 +6,7 @@
 from config.env_loader import apply_env_overrides
 
 # 是否启用自动触发 Flow（False = 跳过，不影响注册结果）
-ENABLE_FLOW_TRIGGER: bool = False
+ENABLE_FLOW_TRIGGER: bool = True
 
 # Flow 触发接口地址
 FLOW_TRIGGER_URL: str = ""

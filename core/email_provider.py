@@ -10,6 +10,8 @@ EMAIL_SOURCE 支持单个或多个来源：
     "gptmail"
     "mailnest"
     "cloudmail"
+    "throwaway"
+    "gonebox"
     "outlook,generic_api,mailnest,cloudmail"          # 按顺序兜底
     ["outlook", "generic_api", "mailnest", "cloudmail"]  # 也兼容列表写法
 """
@@ -18,7 +20,7 @@ from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-_VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail")
+_VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail", "throwaway", "gonebox")
 
 
 def parse_email_sources(value=None) -> list[str]:
@@ -65,6 +67,12 @@ def _pick_from_source(source: str) -> str:
     if source == "cloudmail":
         from core.cloudmail_client import pick_account
         return pick_account().email
+    if source == "throwaway":
+        from core.throwaway_mail_client import pick_account
+        return pick_account().email
+    if source == "gonebox":
+        from core.gonebox_mail_client import pick_account
+        return pick_account().email
     from core.outlook_client import pick_account
     return pick_account().email
 
@@ -99,6 +107,12 @@ def resolve_email_source(email: str) -> str:
     from core.cloudmail_client import get_account_context as get_cloudmail_context
     if get_cloudmail_context(email):
         return "cloudmail"
+    from core.throwaway_mail_client import get_account_context as get_throwaway_context
+    if get_throwaway_context(email):
+        return "throwaway"
+    from core.gonebox_mail_client import get_account_context as get_gonebox_context
+    if get_gonebox_context(email):
+        return "gonebox"
 
     from core import db
     if db.get_generic_api_email_by_email(email):
@@ -125,28 +139,7 @@ def wait_for_otp(
     poll_interval: int | None = None,
     settle_seconds: int | None = None,
 ) -> str:
-    """等待并返回该邮箱最新的 ChatGPT OTP（6 位数字字符串）。
-
-    USE_EMAIL_SERVICE=False 时走手动验证码通道（WebUI 提交 / CLI 输入），
-    不再强制要求 Outlook clientId/refreshToken。
-    """
-    try:
-        from config import email as _email_cfg
-        use_service = bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True))
-    except Exception:
-        use_service = True
-
-    if not use_service:
-        from core.manual_otp import wait_for_manual_otp
-        from config import email as _email_cfg
-        timeout = int(max_wait if max_wait is not None else (getattr(_email_cfg, "OTP_MAX_WAIT", 180) or 180))
-        job_id = None
-        try:
-            from core import registration_service as svc
-            job_id = getattr(svc._THREAD_CTX, "job_id", None)
-        except Exception:
-            job_id = None
-        return wait_for_manual_otp(email, timeout=timeout, job_id=job_id)
+    """等待并返回该邮箱最新的 ChatGPT OTP（6 位数字字符串）。"""
 
     extra_kwargs = {}
     if max_wait is not None:
@@ -175,6 +168,12 @@ def wait_for_otp(
     if source == "cloudmail":
         from core.cloudmail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "throwaway":
+        from core.throwaway_mail_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "gonebox":
+        from core.gonebox_mail_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
     from core.outlook_client import fetch_latest_otp
     return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
 
@@ -199,6 +198,12 @@ def release_email(email: str, status: str = "available", note: str | None = None
         release_account(email, status=status, note=note)
     elif source == "cloudmail":
         from core.cloudmail_client import release_account
+        release_account(email, status=status, note=note)
+    elif source == "throwaway":
+        from core.throwaway_mail_client import release_account
+        release_account(email, status=status, note=note)
+    elif source == "gonebox":
+        from core.gonebox_mail_client import release_account
         release_account(email, status=status, note=note)
     else:
         from core.outlook_client import release_account

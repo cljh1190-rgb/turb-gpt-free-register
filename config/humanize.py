@@ -31,5 +31,38 @@ HUMANIZE_DELAYS = {
     "job_stagger": (0.4, 1.8),
 }
 
+# 延迟采样分布：
+#   uniform   —— 均匀分布（旧行为）
+#   lognormal —— 对数正态：多数停顿偏短、偶发偏长，更接近真人节奏
+#   gamma     —— 伽马分布（shape=2），同样右偏
+HUMANIZE_DISTRIBUTION = "lognormal"
+
+# lognormal/gamma 的右偏程度；越大越“多数很快、偶尔很慢”。
+HUMANIZE_SKEW = 0.45
+
+# 按 kind 配置“跳过延迟”的概率（0-1）。真人不会每一步之间都固定停顿，
+# 让部分 API 间隔直接为 0，破坏机器节拍。关键的输入/等待类保持 0。
+HUMANIZE_SKIP_PROBABILITY = {
+    "api": 0.15,
+    "navigate": 0.05,
+    "challenge": 0.10,
+    "otp_input": 0.0,
+    "form": 0.0,
+    "post_auth": 0.0,
+    "job_stagger": 0.0,
+}
+
+# 偶发“走神”长停顿：命中后在本应停顿之外额外加一段长等待。
+# 只作用于以下 kind，避免拖慢纯等待类（otp_input 本身已足够长）。
+HUMANIZE_PAUSE_PROBABILITY = 0.05
+HUMANIZE_PAUSE_RANGE = (5.0, 15.0)
+HUMANIZE_PAUSE_KINDS = {"navigate", "form", "post_auth", "challenge"}
+
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'ENABLE_HUMANIZE_DELAY': 'bool', 'HUMANIZE_DELAY_FACTOR': 'float'})
+apply_env_overrides(globals(), {
+    'ENABLE_HUMANIZE_DELAY': 'bool',
+    'HUMANIZE_DELAY_FACTOR': 'float',
+    'HUMANIZE_DISTRIBUTION': 'str',
+    'HUMANIZE_SKEW': 'float',
+    'HUMANIZE_PAUSE_PROBABILITY': 'float',
+})

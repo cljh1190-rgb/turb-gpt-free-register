@@ -91,10 +91,11 @@ def _outlook_line(row: dict) -> str:
 
 
 def _generic_api_email_line(row: dict) -> str:
-    return "----".join([
-        row.get("email") or "",
-        row.get("code_url") or "",
-    ])
+    parts = [row.get("email") or ""]
+    if row.get("password"):
+        parts.append(row.get("password") or "")
+    parts.append(row.get("code_url") or "")
+    return "----".join(parts)
 
 
 def _account_line(row: dict) -> str:
@@ -884,6 +885,93 @@ def recover_interrupted_plan_checks() -> int:
         return recovered
 
 
+def claim_account_quota_check(acc_id: int) -> bool:
+    """原子占用账号额度查询。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        if row.get("quota_check_status") in {"queued", "running"}:
+            return False
+        now = _now()
+        row["quota_check_status"] = "queued"
+        row["quota_check_ok"] = False
+        row["quota_check_error"] = None
+        row["quota_check_queued_at"] = now
+        row["quota_check_started_at"] = None
+        row["quota_check_completed_at"] = None
+        row["updated_at"] = now
+        _save_accounts(accounts)
+        return True
+
+
+def mark_account_quota_check_running(acc_id: int) -> bool:
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None or row.get("quota_check_status") not in {"queued", "running"}:
+            return False
+        row["quota_check_status"] = "running"
+        row["quota_check_started_at"] = _now()
+        row["quota_check_error"] = None
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
+def update_account_quota_check(acc_id: int, result: dict | None = None) -> bool:
+    result = result or {}
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        ok = bool(result.get("ok"))
+        row["quota_check_status"] = "success" if ok else "failed"
+        row["quota_check_ok"] = ok
+        row["quota_check_error"] = None if ok else result.get("error")
+        row["quota_check_http_status"] = result.get("http_status")
+        row["quota_checked_at"] = result.get("checked_at") or _now()
+        row["quota_check_completed_at"] = _now()
+        if ok:
+            for key in (
+                "quota_plan_type", "quota_allowed", "quota_limit_reached", "quota_limit_reached_type",
+                "primary_used_percent", "primary_remaining_percent", "primary_limit_window_seconds",
+                "primary_reset_after_seconds", "primary_reset_at", "primary_reset_at_iso",
+                "secondary_used_percent", "secondary_remaining_percent", "secondary_limit_window_seconds",
+                "secondary_reset_after_seconds", "secondary_reset_at", "secondary_reset_at_iso",
+                "credits_has_credits", "credits_unlimited", "credits_balance",
+                "credits_overage_limit_reached", "spend_control_reached", "spend_control_individual_limit",
+            ):
+                if result.get(key) is not None:
+                    row[key] = result.get(key)
+            row["quota_last_success_at"] = result.get("checked_at") or _now()
+        row["quota_check_result_json"] = json.dumps(result, ensure_ascii=False)
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
+def recover_interrupted_quota_checks() -> int:
+    with _LOCK:
+        accounts = _load_accounts()
+        recovered = 0
+        now = _now()
+        for row in accounts:
+            if row.get("quota_check_status") not in {"queued", "running"}:
+                continue
+            row["quota_check_status"] = "failed"
+            row["quota_check_ok"] = False
+            row["quota_check_error"] = "WebUI 重启导致额度查询中断，请重新查询"
+            row["quota_check_completed_at"] = now
+            row["updated_at"] = now
+            recovered += 1
+        if recovered:
+            _save_accounts(accounts)
+        return recovered
+
+
 def update_account_plan_check(acc_id: int | None = None, email: str | None = None, result: dict | None = None) -> bool:
     """更新账号套餐/Plus 试用资格查询结果。"""
     result = result or {}
@@ -950,6 +1038,21 @@ def update_account_plan_check(acc_id: int | None = None, email: str | None = Non
             row["plus_trial_duration_num_periods"] = result.get("plus_trial_duration_num_periods")
             row["plus_trial_duration_period"] = result.get("plus_trial_duration_period")
             row["eligible_offer_ids"] = result.get("eligible_offer_ids") or []
+            for _k in (
+                "plus_trial_coupon_checked",
+                "plus_trial_coupon_state",
+                "plus_trial_coupon_redeemed",
+                "plus_trial_coupon_expires_at",
+                "plus_trial_coupon_promotion_length_days",
+                "plus_trial_coupon_eligible",
+                "plus_trial_coupon_http_status",
+                "plus_trial_coupon_error",
+                "plus_yearly_eligible",
+                "plus_yearly_new_user_eligible",
+                "plus_yearly_existing_user_eligible",
+            ):
+                if _k in result:
+                    row[_k] = result.get(_k)
             row["plan_last_success_at"] = result.get("checked_at") or _now()
             row["plan_last_success_result_json"] = json.dumps(result, ensure_ascii=False)
         row["plan_check_proxy_mode"] = result.get("proxy_mode")
@@ -958,6 +1061,7 @@ def update_account_plan_check(acc_id: int | None = None, email: str | None = Non
         row["plan_check_proxy_fallback_reason"] = result.get("proxy_fallback_reason")
         row["token_expired"] = result.get("token_expired")
         row["token_expires_at"] = result.get("token_expires_at")
+        row["account_validity"] = result.get("account_validity")
         row["plan_check_result_json"] = json.dumps(result, ensure_ascii=False)
         row["updated_at"] = _now()
         _save_accounts(accounts)
@@ -1038,16 +1142,32 @@ def update_account_extract(acc_id: int, result: dict | None = None) -> bool:
             row["extract_link_cdk_remaining"] = result.get("cdk_remaining")
         payload = result.get("result") if isinstance(result.get("result"), dict) else {}
         if payload:
-            row["extract_link_long_url"] = payload.get("long_url")
-            row["extract_link_copy_paste"] = payload.get("copy_paste")
+            # BurstPro 用 result_url；legacy 用 long_url/copy_paste。统一落到 long_url 给前端复制。
+            long_url = (
+                payload.get("long_url")
+                or payload.get("result_url")
+                or payload.get("paypal_approve_url")
+                or payload.get("provider_redirect_url")
+                or payload.get("url")
+                or payload.get("link")
+                or payload.get("payment_url")
+            )
+            row["extract_link_long_url"] = long_url
+            row["extract_link_copy_paste"] = payload.get("copy_paste") or long_url
             row["extract_link_image_url_png"] = payload.get("image_url_png")
             row["extract_link_image_url_svg"] = payload.get("image_url_svg")
-            row["extract_link_payment_method"] = payload.get("payment_method")
-            row["extract_link_payment_link_type"] = payload.get("payment_link_type")
+            row["extract_link_payment_method"] = payload.get("payment_method") or "upi"
+            row["extract_link_payment_link_type"] = payload.get("payment_link_type") or payload.get("link_type")
             row["extract_link_expires_at"] = payload.get("expires_at")
             if payload.get("cdk_remaining") is not None:
                 row["extract_link_cdk_remaining"] = payload.get("cdk_remaining")
             row["extract_link_result_json"] = json.dumps(payload, ensure_ascii=False)
+        # 远端明确无优惠：清掉可试用标记，避免 UI 反复点提链
+        err_text = str(result.get("error") or result.get("message") or "")
+        if (not ok) and status == "failed" and ("account_no_discount" in err_text):
+            row["plus_trial_eligible"] = False
+            if not row.get("extract_link_message"):
+                row["extract_link_message"] = "远端确认无 Plus 优惠（account_no_discount）"
         row["updated_at"] = _now()
         _save_accounts(accounts)
         return True
@@ -1059,12 +1179,18 @@ def recover_interrupted_extract_links() -> int:
         accounts = _load_accounts()
         recovered = 0
         now = _now()
+        try:
+            from core.extract_link_service import extraction_enabled
+            disabled = not extraction_enabled()
+        except Exception:
+            disabled = False
         for row in accounts:
             if row.get("extract_link_status") not in {"queued", "running"}:
                 continue
-            row["extract_link_status"] = "failed"
+            row["extract_link_status"] = "stopped" if disabled else "failed"
             row["extract_link_ok"] = False
-            row["extract_link_error"] = "WebUI 重启导致提链任务中断，请重新提链"
+            row["extract_link_error"] = "提链功能已关闭" if disabled else "WebUI 重启导致提链任务中断，请重新提链"
+            row["extract_link_message"] = "提链功能已关闭，任务已停止" if disabled else row.get("extract_link_message")
             row["extract_link_completed_at"] = now
             row["updated_at"] = now
             recovered += 1
@@ -1102,7 +1228,13 @@ def list_account_plan_check_statuses(limit: int = 5000, offset: int = 0, archive
     fields = (
         "id", "email", "archived",
         "plan_type", "current_plan_type", "plus_trial_eligible",
-        "plan_check_status", "plan_check_ok", "plan_check_error",
+        "plus_trial_coupon_checked", "plus_trial_coupon_state",
+        "plus_trial_coupon_redeemed", "plus_trial_coupon_eligible",
+        "plus_trial_coupon_http_status", "plus_trial_coupon_error",
+        "plus_trial_coupon_promotion_length_days",
+        "plus_yearly_eligible", "plus_yearly_new_user_eligible",
+        "plus_yearly_existing_user_eligible",
+        "plan_check_status", "plan_check_ok", "plan_check_error", "account_validity",
         "plan_check_trigger", "plan_check_queued_at", "plan_check_started_at",
         "plan_check_completed_at", "plan_checked_at", "plan_last_success_at",
         "plan_check_network_route", "plan_check_proxy_used", "plan_check_proxy_fallback_reason",
@@ -1199,6 +1331,117 @@ def get_account_by_email(email: str) -> dict | None:
         return _decorate_account(row) if row else None
 
 
+def mark_account_plus_check_import(
+    acc_id: int,
+    *,
+    detected_format: str | None = None,
+    synthetic_email: bool = False,
+) -> bool:
+    """标记账号由独立 PLUS 查询页导入，不改变账号原有来源和注册资料。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        now = _now()
+        row["plus_check_imported_at"] = now
+        row["plus_check_import_format"] = str(detected_format or "auto")
+        row["plus_check_synthetic_email"] = bool(synthetic_email)
+        row["updated_at"] = now
+        _save_accounts(rows)
+        return True
+
+
+def upsert_plus_check_accounts(records: list[dict]) -> list[dict]:
+    """批量写入独立 PLUS 查询账号，一次落盘，避免逐账号重建导出文件。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        by_email = {(row.get("email") or "").lower(): row for row in accounts}
+        results: list[dict] = []
+        now = _now()
+        for raw in records:
+            email = str(raw.get("email") or "").strip()
+            token = str(raw.get("access_token") or "").strip()
+            if not email or not token:
+                continue
+            key = email.lower()
+            row = by_email.get(key)
+            existed = row is not None
+            if row is None:
+                row = {
+                    "id": _next_id(accounts),
+                    "email": email,
+                    "created_at": now,
+                    "email_source": "plus_check_import",
+                    "extra_json": json.dumps({"plus_check_import": True}, ensure_ascii=False),
+                }
+                accounts.append(row)
+                by_email[key] = row
+            row["access_token"] = token
+            if raw.get("user_id") is not None:
+                row["user_id"] = raw.get("user_id")
+            if raw.get("user_name"):
+                row["user_name"] = raw.get("user_name")
+            if raw.get("plan_type"):
+                row["plan_type"] = raw.get("plan_type")
+            for oauth_key in (
+                "oauth_id_token", "oauth_refresh_token", "oauth_client_id",
+                "oauth_organization_id", "oauth_expires_at",
+            ):
+                if raw.get(oauth_key) not in (None, ""):
+                    row[oauth_key] = raw.get(oauth_key)
+            if raw.get("account_id") and not row.get("account_id"):
+                row["account_id"] = raw.get("account_id")
+            row["plus_check_imported_at"] = now
+            row["plus_check_import_format"] = str(raw.get("detected_format") or "auto")
+            row["plus_check_synthetic_email"] = bool(raw.get("synthetic_email"))
+            row["updated_at"] = now
+            row["copy_line"] = _account_line(row)
+            results.append({
+                **raw,
+                "id": int(row.get("id") or 0),
+                "existing": existed,
+            })
+        if results:
+            _save_accounts(accounts)
+        return results
+
+
+def list_plus_check_accounts(limit: int = 500, q: str | None = None) -> list[dict]:
+    """列出通过独立 PLUS 查询页导入过的账号，不返回其它普通账号。"""
+    with _LOCK:
+        rows = [r for r in _load_accounts() if r.get("plus_check_imported_at")]
+        decorated = [_decorate_account(r) for r in rows]
+        decorated = [r for r in decorated if _account_matches_query(r, q)]
+        decorated.sort(
+            key=lambda x: (str(x.get("plus_check_imported_at") or ""), int(x.get("id") or 0)),
+            reverse=True,
+        )
+        return decorated[:max(1, min(5000, int(limit or 500)))]
+
+
+def clear_plus_check_accounts(account_ids: list[int] | None = None) -> list[dict]:
+    """从独立 PLUS 查询池移除账号标记；保留主账号记录和 Token。"""
+    ids = None if account_ids is None else {int(x) for x in account_ids}
+    removed: list[dict] = []
+    with _LOCK:
+        rows = _load_accounts()
+        for row in rows:
+            if not row.get("plus_check_imported_at"):
+                continue
+            row_id = int(row.get("id") or 0)
+            if ids is not None and row_id not in ids:
+                continue
+            removed.append({"id": row_id, "email": row.get("email")})
+            row.pop("plus_check_imported_at", None)
+            row.pop("plus_check_import_format", None)
+            row.pop("plus_check_synthetic_email", None)
+            row["updated_at"] = _now()
+        if removed:
+            _save_accounts(rows)
+    return removed
+
+
 def update_account_note(acc_id: int, note: str) -> bool:
     """更新单个已注册账号备注。note 为空字符串时表示清空备注。"""
     with _LOCK:
@@ -1238,9 +1481,69 @@ def update_accounts_note(account_ids: list[int] | None, note: str) -> tuple[list
             seen_ids.add(row_id)
         for item in ids - seen_ids:
             skipped.append({"id": item, "reason": "账号不存在"})
-        if updated:
-            _save_accounts(rows)
+    if updated:
+        _save_accounts(rows)
     return updated, skipped
+
+
+def list_all_accounts() -> list[dict]:
+    """返回全部注册账号原始行（含 token 等完整字段），供号池巡检等内部服务批量读取。"""
+    with _LOCK:
+        return [dict(r) for r in _load_accounts()]
+
+
+def update_account_pool_state(acc_id: int, *, enabled: bool, reason: str | None = None) -> bool:
+    """
+    更新账号号池开关状态。
+    enabled=False 时记录踢出原因；enabled=True 时清空禁用与“耗尽”标记，让账号回归可用判定。
+    """
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        now = _now()
+        row["pool_enabled"] = bool(enabled)
+        row["pool_disabled_reason"] = str(reason or "") if not enabled else None
+        row["pool_state_updated_at"] = now
+        if enabled:
+            row["pool_status"] = "available"
+            row["pool_exhausted_reason"] = None
+            row["pool_exhausted_at"] = None
+        row["updated_at"] = now
+        _save_accounts(rows)
+        return True
+
+
+def mark_account_pool_acquired(acc_id: int) -> dict | None:
+    """记录账号被号池分配一次，返回新的 {pool_last_acquired_at, pool_acquire_count}；账号不存在返回 None。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return None
+        now = _now()
+        row["pool_last_acquired_at"] = now
+        row["pool_acquire_count"] = int(row.get("pool_acquire_count") or 0) + 1
+        row["updated_at"] = now
+        _save_accounts(rows)
+        return {"pool_last_acquired_at": now, "pool_acquire_count": row["pool_acquire_count"]}
+
+
+def mark_account_pool_exhausted(acc_id: int, reason: str | None = None) -> bool:
+    """标记账号额度耗尽/受限（无感切号写回），后续重新成功查额度后自动恢复。"""
+    with _LOCK:
+        rows = _load_accounts()
+        row = next((r for r in rows if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        now = _now()
+        row["pool_status"] = "exhausted"
+        row["pool_exhausted_reason"] = str(reason or "额度已耗尽")[:200]
+        row["pool_exhausted_at"] = now
+        row["updated_at"] = now
+        _save_accounts(rows)
+        return True
 
 
 def archive_account(acc_id: int, archived: bool = True) -> bool:
@@ -1422,6 +1725,7 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
                     pool_row = {
                         "id": _next_id(generic_rows),
                         "email": email,
+                        "password": (raw.get("password") or "").strip(),
                         "code_url": code_url,
                         "status": "used",
                         "used_at": now,
@@ -1431,6 +1735,7 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
                     generic_rows.append(pool_row)
                 else:
                     pool_row["code_url"] = code_url or pool_row.get("code_url")
+                    pool_row["password"] = (raw.get("password") or pool_row.get("password") or "").strip()
                 pool_row["status"] = "used"
                 pool_row["used_at"] = pool_row.get("used_at") or now
                 pool_row["completed_at"] = pool_row.get("completed_at") or now
@@ -1624,6 +1929,7 @@ def import_generic_api_emails(records: list[dict]) -> tuple[int, int]:
             row = {
                 "id": _next_id(rows),
                 "email": email,
+                "password": (raw.get("password") or "").strip(),
                 "code_url": code_url,
                 "status": "available",
                 "used_at": None,
@@ -1637,12 +1943,111 @@ def import_generic_api_emails(records: list[dict]) -> tuple[int, int]:
         return inserted, skipped
 
 
+def upsert_generic_api_emails_for_registration(records: list[dict]) -> dict:
+    """为“邮箱链接注册”写入邮箱池，并返回本次可绑定任务的邮箱。
+
+    用户明确再次提交邮箱链接时，允许更新旧链接并恢复未注册、无活跃任务的
+    池记录；已经生成本地账号或正在注册的邮箱不会被覆盖。
+    """
+    with _LOCK:
+        rows = _load_generic_api_emails()
+        accounts = _load_accounts()
+        jobs = _load_jobs()
+        active_states = {"pending", "running", "stopping"}
+        accepted: list[str] = []
+        errors: list[dict] = []
+        seen: set[str] = set()
+        inserted = updated = skipped = 0
+
+        for raw in records:
+            line_no = raw.get("line_no")
+            email = str(raw.get("email") or "").strip()
+            code_url = str(raw.get("code_url") or raw.get("mail_url") or raw.get("url") or "").strip()
+            key = email.lower()
+            error_base = {"line_no": line_no, "email": email}
+
+            if not email or not code_url:
+                skipped += 1
+                errors.append({**error_base, "reason": "邮箱或邮箱查看链接为空"})
+                continue
+            if key in seen:
+                skipped += 1
+                errors.append({**error_base, "reason": "同一批次中邮箱重复"})
+                continue
+            seen.add(key)
+
+            if _find_by_email(accounts, email) is not None:
+                skipped += 1
+                errors.append({**error_base, "reason": "该邮箱已存在本地注册账号"})
+                continue
+
+            active_job = next((
+                job for job in jobs
+                if str(job.get("email") or "").strip().lower() == key
+                and job.get("status") in active_states
+            ), None)
+            if active_job is not None:
+                skipped += 1
+                errors.append({
+                    **error_base,
+                    "reason": f"该邮箱已有活跃注册任务 #{active_job.get('id')}",
+                })
+                continue
+
+            row = _find_by_email(rows, email)
+            if row is None:
+                row = {
+                "id": _next_id(rows),
+                "email": email,
+                "password": (raw.get("password") or "").strip(),
+                "code_url": code_url,
+                    "status": "available",
+                    "used_at": None,
+                    "note": "邮箱链接注册导入",
+                    "imported_at": _now(),
+                }
+                rows.append(row)
+                inserted += 1
+            else:
+                row["code_url"] = code_url
+                row["password"] = (raw.get("password") or row.get("password") or "").strip()
+                row["status"] = "available"
+                row["used_at"] = None
+                row["note"] = "邮箱链接注册重新启用"
+                row["updated_at"] = _now()
+                updated += 1
+            accepted.append(email)
+
+        _save_generic_api_emails(rows)
+        return {
+            "accepted": accepted,
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
+
 def claim_next_generic_api_email() -> dict | None:
     """原子领取一个可用通用 API 邮箱并标记为 used。"""
     with _LOCK:
         rows = sorted(_load_generic_api_emails(), key=lambda x: int(x.get("id") or 0))
         row = next((r for r in rows if r.get("status") == "available"), None)
         if row is None:
+            return None
+        row["status"] = "used"
+        row["used_at"] = _now()
+        row["note"] = None
+        _save_generic_api_emails(rows)
+        return _decorate_generic_api_email(row)
+
+
+def claim_generic_api_email(email: str) -> dict | None:
+    """原子领取指定的通用 API 邮箱；仅 available 状态可领取。"""
+    with _LOCK:
+        rows = _load_generic_api_emails()
+        row = _find_by_email(rows, email)
+        if row is None or row.get("status") != "available":
             return None
         row["status"] = "used"
         row["used_at"] = _now()
@@ -1907,11 +2312,11 @@ def _new_job_row(
     }
 
 
-def create_job(email_source: str) -> dict:
+def create_job(email_source: str, email: str | None = None) -> dict:
     """创建一个首次执行的 pending 注册任务。"""
     with _LOCK:
         rows = _load_jobs()
-        row = _new_job_row(rows, email_source=email_source)
+        row = _new_job_row(rows, email_source=email_source, email=email)
         rows.append(row)
         _save_jobs(rows)
         return dict(row)

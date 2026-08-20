@@ -17,6 +17,8 @@ from core.session import BrowserSession
 logger = logging.getLogger(__name__)
 
 ACCOUNTS_CHECK_PATH = "/backend-api/accounts/check/v4-2023-04-27"
+PLUS_TRIAL_COUPON_PATH = "/backend-api/promo_campaign/check_coupon"
+PLUS_TRIAL_COUPON_ID = "plus-1-month-free"
 
 
 def now_iso() -> str:
@@ -75,27 +77,114 @@ def _local_proxy_status(proxy: str) -> tuple[bool, bool, str | None]:
         return False, False, f"代理地址解析失败（{type(exc).__name__}）"
 
 
-def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
+def _plan_country_route(proxy_cfg: Any, explicit_proxy: Optional[str]) -> dict | None:
+    """ThorData 开启时，为套餐/试用查询强制选择隔离的国家池。"""
+    if not bool(getattr(proxy_cfg, "THORDATA_ENABLED", False)):
+        return None
+    country = str(getattr(proxy_cfg, "PLAN_CHECK_THORDATA_COUNTRY", "") or "").strip().upper()
+    if not country:
+        return None
+    number = max(1, min(100, int(getattr(proxy_cfg, "PLAN_CHECK_THORDATA_NUMBER", 3) or 3)))
+    selected = str(
+        proxy_cfg.pick_healthy_country_proxy(country, number=number, probe=True) or ""
+    ).strip()
+    if not selected:
+        raise ValueError(f"套餐/试用查询未找到可用的 ThorData {country} 出口")
+    exit_meta = proxy_cfg.get_proxy_metadata(selected)
+    return {
+        "proxy": selected,
+        "proxy_mode": "plan_country_enforced",
+        "network_route": "proxy",
+        "proxy_used": _mask_proxy(selected),
+        "proxy_fallback_reason": "plan_check_country_enforced" if explicit_proxy is not None else None,
+        "plan_check_proxy_country": country,
+        "plan_check_proxy_number": number,
+        "proxy_gateway_ip": exit_meta.get("gateway_ip"),
+        "proxy_entry_port": exit_meta.get("entry_port"),
+        "proxy_exit_ip": exit_meta.get("exit_ip") or exit_meta.get("ip"),
+        "proxy_exit_country": exit_meta.get("country"),
+        "proxy_exit_verified": bool(exit_meta.get("verified_exit")),
+    }
+
+
+def _cliproxy_route(proxy_cfg: Any, explicit_proxy: Optional[str]) -> dict | None:
+    """动态 Cliproxy 模式为套餐查询创建全新 SOCKS5 会话。"""
+    if not bool(getattr(proxy_cfg, "cliproxy_pool_enabled", lambda: False)()):
+        return None
+    country = str(getattr(proxy_cfg, "PLAN_CHECK_CLIPROXY_COUNTRY", "JP") or "JP").strip().upper()
+    # 不预探测出口：探测最多会先阻塞三轮，而且探测成功也不能代表
+    # ChatGPT 不会返回 403。直接发业务请求，失败时再换新 sid。
+    selected = str(proxy_cfg.new_cliproxy_country_session(country) or "").strip()
+    if not selected:
+        detail = str(getattr(proxy_cfg, "last_cliproxy_error", lambda: "")() or "").strip()
+        suffix = f"：{detail}" if detail else ""
+        raise ValueError(f"套餐查询未找到可用的 Cliproxy SOCKS5 出口{suffix}")
+    exit_meta = proxy_cfg.get_proxy_metadata(selected)
+    return {
+        "proxy": selected,
+        "proxy_mode": "cliproxy_dynamic_enforced",
+        "network_route": "proxy",
+        "proxy_used": _mask_proxy(selected),
+        "proxy_fallback_reason": "cliproxy_dynamic_required" if explicit_proxy is not None else None,
+        "plan_check_cliproxy_country": country,
+        "proxy_gateway_ip": exit_meta.get("gateway_ip"),
+        "proxy_entry_port": exit_meta.get("entry_port"),
+        "proxy_exit_ip": exit_meta.get("exit_ip") or exit_meta.get("ip"),
+        "proxy_exit_country": exit_meta.get("country"),
+        "proxy_exit_verified": bool(exit_meta.get("verified_exit")),
+    }
+
+
+def resolve_plan_check_route(
+    explicit_proxy: Optional[str] = None,
+    *,
+    use_plan_country: bool = True,
+) -> dict:
     """解析套餐查询的实际网络路径。
 
     explicit_proxy 不是 None 时表示 API 调用方明确覆盖配置；空字符串代表直连。
     """
+    from config import proxy as proxy_cfg
+
+    if use_plan_country:
+        country_route = _plan_country_route(proxy_cfg, explicit_proxy)
+        if country_route is not None:
+            return country_route
+
+    cliproxy_route = _cliproxy_route(proxy_cfg, explicit_proxy)
+    if cliproxy_route is not None:
+        return cliproxy_route
+
     if explicit_proxy is not None:
         selected = str(explicit_proxy or "").strip()
+        enforced = False
+        if (
+            bool(getattr(proxy_cfg, "proxy_required", lambda: False)())
+            and not bool(getattr(proxy_cfg, "proxy_allowed", lambda value: bool(value))(selected))
+        ):
+            selected = str(proxy_cfg.pick_proxy() or "").strip()
+            enforced = True
         return {
             "proxy": selected,
-            "proxy_mode": "request",
+            "proxy_mode": "proxy_enforced" if enforced else "request",
             "network_route": "proxy" if selected else "direct",
             "proxy_used": _mask_proxy(selected) or None,
-            "proxy_fallback_reason": None,
+            "proxy_fallback_reason": "thordata_required" if enforced else None,
         }
-
-    from config import proxy as proxy_cfg
 
     mode = str(getattr(proxy_cfg, "PLAN_CHECK_PROXY_MODE", "auto") or "auto").strip().lower()
     if mode not in {"auto", "proxy", "direct"}:
         raise ValueError(f"PLAN_CHECK_PROXY_MODE={mode!r} 无效，可选 auto / proxy / direct")
     if mode == "direct":
+        if bool(getattr(proxy_cfg, "proxy_required", lambda: False)()):
+            selected = str(proxy_cfg.pick_proxy() or "").strip()
+            return {
+                "proxy": selected,
+                "proxy_mode": "proxy_enforced",
+                "network_route": "proxy",
+                "proxy_used": _mask_proxy(selected),
+                "proxy_fallback_reason": "direct_disabled_by_thordata",
+            }
         return {
             "proxy": "",
             "proxy_mode": mode,
@@ -105,10 +194,16 @@ def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
         }
 
     selected = str(getattr(proxy_cfg, "PLAN_CHECK_PROXY", "") or "").strip()
+    # 禁止本机系统代理（10808/7897）：直连 chatgpt 会超时，且与注册专用池隔离策略冲突。
+    if selected and getattr(proxy_cfg, "_is_forbidden_local_proxy", None) and proxy_cfg._is_forbidden_local_proxy(selected):
+        logger.warning("[Plan] PLAN_CHECK_PROXY 指向禁止端口（%s），改抽注册专用池", _mask_proxy(selected))
+        selected = ""
     if not selected:
         selected = str(proxy_cfg.pick_proxy() or "").strip()
+    if selected and getattr(proxy_cfg, "_is_forbidden_local_proxy", None) and proxy_cfg._is_forbidden_local_proxy(selected):
+        selected = ""
     if not selected:
-        if mode == "proxy":
+        if mode == "proxy" or bool(getattr(proxy_cfg, "proxy_required", lambda: False)()):
             raise ValueError("套餐查询网络模式为 proxy，但未配置 PLAN_CHECK_PROXY 或 PROXY_POOL")
         return {
             "proxy": "",
@@ -120,13 +215,19 @@ def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
 
     is_local, available, reason = _local_proxy_status(selected)
     if mode == "auto" and is_local and not available:
-        return {
-            "proxy": "",
-            "proxy_mode": mode,
-            "network_route": "direct_fallback",
-            "proxy_used": _mask_proxy(selected),
-            "proxy_fallback_reason": reason,
-        }
+        # 本地端口未监听：再试一次抽别的池端口，仍不行才 direct（国内 direct 通常也超时）
+        alt = str(proxy_cfg.pick_proxy(exclude=[selected]) or "").strip()
+        if alt and alt != selected:
+            selected = alt
+            is_local, available, reason = _local_proxy_status(selected)
+        if is_local and not available:
+            return {
+                "proxy": "",
+                "proxy_mode": mode,
+                "network_route": "direct_fallback",
+                "proxy_used": _mask_proxy(selected),
+                "proxy_fallback_reason": reason,
+            }
     return {
         "proxy": selected,
         "proxy_mode": mode,
@@ -187,6 +288,81 @@ def _common_headers(env: BrowserSession, token: str) -> dict[str, str]:
         "x-openai-target-route": ACCOUNTS_CHECK_PATH,
     })
     return headers
+
+
+def parse_plus_trial_coupon(data: dict) -> dict:
+    """Parse the dedicated Plus trial coupon eligibility response."""
+    if not isinstance(data, dict):
+        raise ValueError("试用资格响应不是 JSON 对象")
+    state = str(data.get("state") or "").strip().lower()
+    redemption = data.get("redemption") if isinstance(data.get("redemption"), dict) else {}
+    redeemed = bool(
+        redemption.get("redeemed")
+        or redemption.get("redeemed_by_user")
+        or redemption.get("redeemed_by_workspace")
+    )
+    eligible = bool(
+        not redeemed
+        and state in {"eligible", "available", "active", "valid"}
+    )
+    return {
+        "plus_trial_coupon_checked": True,
+        "plus_trial_coupon_state": state or None,
+        "plus_trial_coupon_redeemed": redeemed,
+        "plus_trial_coupon_expires_at": redemption.get("expires_at"),
+        "plus_trial_coupon_promotion_length_days": redemption.get("promotion_length_days"),
+        "plus_trial_coupon_eligible": eligible,
+    }
+
+
+def _check_plus_trial_coupon(env: BrowserSession, token: str, timeout: float) -> dict:
+    headers = _common_headers(env, token)
+    headers.update({
+        "accept": "application/json",
+        "x-openai-target-path": PLUS_TRIAL_COUPON_PATH,
+        "x-openai-target-route": PLUS_TRIAL_COUPON_PATH,
+    })
+    response = env.session.get(
+        f"https://chatgpt.com{PLUS_TRIAL_COUPON_PATH}",
+        params={
+            "coupon": PLUS_TRIAL_COUPON_ID,
+            "is_coupon_from_query_param": "true",
+        },
+        headers=headers,
+        allow_redirects=False,
+        timeout=timeout,
+    )
+    status = int(response.status_code)
+    if not (200 <= status < 300):
+        return {
+            "plus_trial_coupon_checked": False,
+            "plus_trial_coupon_http_status": status,
+            "plus_trial_coupon_error": f"HTTP {status}",
+        }
+    try:
+        data = response.json()
+    except Exception:
+        text = response.text or ""
+        data = json.loads(text) if text.strip().startswith("{") else None
+    parsed = parse_plus_trial_coupon(data)
+    parsed["plus_trial_coupon_http_status"] = status
+    return parsed
+
+
+def _merge_plus_trial_coupon(plan: dict, coupon: dict) -> dict:
+    plan.update(coupon)
+    if not coupon.get("plus_trial_coupon_checked"):
+        return plan
+    coupon_eligible = bool(coupon.get("plus_trial_coupon_eligible"))
+    plan["plus_trial_eligible"] = bool(plan.get("plus_trial_eligible") or coupon_eligible)
+    if coupon_eligible:
+        plan["plus_trial_campaign_id"] = plan.get("plus_trial_campaign_id") or PLUS_TRIAL_COUPON_ID
+        plan["plus_trial_title"] = plan.get("plus_trial_title") or "ChatGPT Plus 一月免费试用"
+        promotion_days = coupon.get("plus_trial_coupon_promotion_length_days")
+        if promotion_days and not plan.get("plus_trial_duration_num_periods"):
+            plan["plus_trial_duration_num_periods"] = promotion_days
+            plan["plus_trial_duration_period"] = "day"
+    return plan
 
 
 def parse_accounts_check(data: dict, *, token: str = "") -> dict:
@@ -264,6 +440,9 @@ def parse_accounts_check(data: dict, *, token: str = "") -> dict:
         "plus_trial_duration_num_periods": duration.get("num_periods"),
         "plus_trial_duration_period": duration.get("period"),
         "plus_trial_promotion_type_label": plus_meta.get("promotion_type_label"),
+        "plus_yearly_eligible": bool(item.get("is_eligible_for_yearly_plus_subscription")),
+        "plus_yearly_new_user_eligible": bool(item.get("is_eligible_for_yearly_plus_new_user_subscription")),
+        "plus_yearly_existing_user_eligible": bool(item.get("is_eligible_for_yearly_plus_existing_user_subscription")),
         "eligible_offer_ids": eligible_offer_ids,
         "features_count": len(item.get("features") or []),
         "can_access_with_session": bool(item.get("can_access_with_session")),
@@ -285,15 +464,47 @@ def _plan_check_settings(
     delay_value = retry_delay if retry_delay is not None else getattr(proxy_cfg, "PLAN_CHECK_RETRY_DELAY", 1.5)
     return (
         max(1.0, min(60.0, float(timeout_value or 15.0))),
-        max(1, min(4, int(attempts_value or 1))),
+        max(1, min(8, int(attempts_value or 1))),
         max(0.0, min(30.0, float(delay_value or 0.0))),
     )
 
 
-def _retryable_plan_error(http_status: int | None) -> bool:
+def _retryable_plan_error(http_status: int | None, response_text: str = "") -> bool:
     if http_status is None:
         return True
-    return http_status in {408, 409, 425, 429} or http_status >= 500
+    body = str(response_text or "").lower()
+    if http_status == 401 and any(
+        marker in body
+        for marker in (
+            "token_revoked",
+            "token_invalidated",
+            "token has been invalidated",
+            "invalidated oauth token",
+            "oauth token for user",
+        )
+    ):
+        return False
+    # ChatGPT's account-check edge can return 401/403 for a rejected proxy
+    # exit, not only for an invalid token. Token expiry is handled before the
+    # request by token_claims(); retrying here lets dynamic proxy routes switch
+    # to a fresh exit before giving up.
+    return http_status in {401, 403, 408, 409, 425, 429} or http_status >= 500
+
+
+def _account_validity(http_status: int | None, response_text: str = "", *, token_expired: bool = False) -> str:
+    """Classify token validity without mistaking a proxy-blocked 403 for an invalid account."""
+    if token_expired:
+        return "invalid"
+    body = str(response_text or "").lower()
+    if http_status == 401:
+        return "invalid"
+    if any(marker in body for marker in ("token_revoked", "token has been invalidated", "invalidated oauth token")):
+        return "invalid"
+    if http_status == 403:
+        return "unknown_proxy_or_policy"
+    if http_status is not None and 200 <= http_status < 300:
+        return "valid"
+    return "unknown"
 
 
 def _retry_wait_seconds(resp: Any, base_delay: float, attempt: int) -> float:
@@ -311,13 +522,23 @@ def check_account_plan(
     *,
     proxy: Optional[str] = None,
     timezone_offset_min: str = "-",
+    device_id: str | None = None,
+    browser_profile: dict | None = None,
     timeout: float | None = None,
     max_attempts: int | None = None,
     retry_delay: float | None = None,
+    include_plus_trial: bool = True,
 ) -> dict:
     token = normalize_token(token)
     if not token:
         return {"ok": False, "checked_at": now_iso(), "error": "token 为空"}
+    if str(timezone_offset_min or "").strip() in {"", "-"} and isinstance(browser_profile, dict):
+        profile_offset = browser_profile.get("timezone_offset_minutes")
+        if profile_offset is not None:
+            try:
+                timezone_offset_min = str(-int(profile_offset or 0))
+            except (TypeError, ValueError):
+                timezone_offset_min = "-"
     claims = token_claims(token)
     if claims.get("token_expired") is True:
         return {
@@ -325,6 +546,7 @@ def check_account_plan(
             "checked_at": now_iso(),
             "http_status": None,
             "error": "token 已过期",
+            "account_validity": "invalid",
             **{k: v for k, v in claims.items() if k != "payload"},
         }
 
@@ -340,6 +562,11 @@ def check_account_plan(
         }
     route_meta = {k: v for k, v in route.items() if k != "proxy"}
     url = f"https://chatgpt.com{ACCOUNTS_CHECK_PATH}?timezone_offset_min={quote(str(timezone_offset_min))}"
+    from config import proxy as runtime_proxy_cfg
+    allow_proxy_switch = route.get("proxy_mode") == "cliproxy_dynamic_enforced" or bool(route.get("plan_check_proxy_country")) or proxy is None or (
+        not str(proxy or "").strip()
+        and bool(getattr(runtime_proxy_cfg, "proxy_required", lambda: False)())
+    )
     try:
         timeout_seconds, attempts, base_delay = _plan_check_settings(timeout, max_attempts, retry_delay)
     except Exception as exc:
@@ -354,12 +581,58 @@ def check_account_plan(
         }
 
     last_result: dict | None = None
+    failed_proxies: list[str] = []
     for attempt in range(1, attempts + 1):
         env = None
         resp = None
+        # 自动模式下每次重试换出口，避免同一死节点连撞 15s 超时。
+        if attempt > 1 and allow_proxy_switch:
+            try:
+                from config import proxy as proxy_cfg
+                alt = ""
+                plan_country = str(route.get("plan_check_proxy_country") or "").strip().upper()
+                if plan_country:
+                    alt = str(proxy_cfg.pick_healthy_country_proxy(
+                        plan_country,
+                        number=int(route.get("plan_check_proxy_number") or 3),
+                        exclude=failed_proxies,
+                        probe=True,
+                    ) or "").strip()
+                else:
+                    if bool(getattr(proxy_cfg, "cliproxy_pool_enabled", lambda: False)()):
+                        # 403/临时网络错误后直接创建新 sid，并用新出口发送下一次业务请求。
+                        clip_country = str(route.get("plan_check_cliproxy_country") or "JP").strip().upper()
+                        alt = str(proxy_cfg.new_cliproxy_country_session(clip_country) or "").strip()
+                    else:
+                        alt = str(proxy_cfg.pick_proxy(exclude=failed_proxies) or "").strip()
+                if alt:
+                    exit_meta = proxy_cfg.get_proxy_metadata(alt)
+                    route = {
+                        "proxy": alt,
+                        "proxy_mode": route.get("proxy_mode") or "auto",
+                        "network_route": "proxy",
+                        "proxy_used": _mask_proxy(alt),
+                        "proxy_fallback_reason": f"retry_switch_from={_mask_proxy(failed_proxies[-1]) if failed_proxies else '-'}",
+                        "plan_check_proxy_country": plan_country or None,
+                        "plan_check_proxy_number": route.get("plan_check_proxy_number") if plan_country else None,
+                        "plan_check_cliproxy_country": route.get("plan_check_cliproxy_country"),
+                        "proxy_gateway_ip": exit_meta.get("gateway_ip"),
+                        "proxy_entry_port": exit_meta.get("entry_port"),
+                        "proxy_exit_ip": exit_meta.get("exit_ip") or exit_meta.get("ip"),
+                        "proxy_exit_country": exit_meta.get("country"),
+                        "proxy_exit_verified": bool(exit_meta.get("verified_exit")),
+                    }
+                    route_meta = {k: v for k, v in route.items() if k != "proxy"}
+            except Exception:
+                pass
         try:
             # 套餐查询只需要稳定的请求头，不需要额外访问 IP 地理信息接口。
-            env = BrowserSession(proxy=route["proxy"], detect_exit_geo=False)
+            env = BrowserSession(
+                proxy=route["proxy"],
+                detect_exit_geo=False,
+                device_id=device_id,
+                browser_profile=browser_profile,
+            )
             resp = env.session.get(
                 url,
                 headers=_common_headers(env, token),
@@ -373,9 +646,14 @@ def check_account_plan(
                     "ok": False,
                     "checked_at": now_iso(),
                     "http_status": http_status,
-                    "error": f"HTTP {http_status}",
+                    "error": (
+                        "OAuth Token 已被撤销（token_revoked），请重新注册/重新授权"
+                        if not _retryable_plan_error(http_status, response_text)
+                        else f"HTTP {http_status}"
+                    ),
                     "response_preview": response_text[:500],
-                    "retryable": _retryable_plan_error(http_status),
+                    "retryable": _retryable_plan_error(http_status, response_text),
+                    "account_validity": _account_validity(http_status, response_text),
                 }
             else:
                 try:
@@ -390,14 +668,25 @@ def check_account_plan(
                         "error": "响应不是 JSON 对象",
                         "response_preview": response_text[:500],
                         "retryable": True,
+                        "account_validity": "unknown",
                     }
                 else:
                     parsed = parse_accounts_check(data, token=token)
+                    if include_plus_trial and str(parsed.get("current_plan_type") or "").lower() == "free":
+                        try:
+                            coupon_result = _check_plus_trial_coupon(env, token, timeout_seconds)
+                        except Exception as exc:
+                            coupon_result = {
+                                "plus_trial_coupon_checked": False,
+                                "plus_trial_coupon_error": f"{type(exc).__name__}: {str(exc)[:180]}",
+                            }
+                        _merge_plus_trial_coupon(parsed, coupon_result)
                     parsed["http_status"] = http_status
                     parsed["attempt_count"] = attempt
                     parsed["max_attempts"] = attempts
                     parsed["request_timeout"] = timeout_seconds
                     parsed["retryable"] = False
+                    parsed["account_validity"] = "valid"
                     parsed.update(route_meta)
                     return parsed
         except Exception as exc:
@@ -408,6 +697,7 @@ def check_account_plan(
                 "http_status": int(resp.status_code) if resp is not None and getattr(resp, "status_code", None) else None,
                 "error": f"{type(exc).__name__}: {exc}",
                 "retryable": True,
+                "account_validity": "unknown",
             }
         finally:
             if env is not None:
@@ -424,16 +714,20 @@ def check_account_plan(
             **route_meta,
             **{k: v for k, v in claims.items() if k != "payload"},
         })
+        used_proxy = str(route.get("proxy") or "").strip()
+        if used_proxy and used_proxy not in failed_proxies:
+            failed_proxies.append(used_proxy)
         if not last_result.get("retryable") or attempt >= attempts:
             return last_result
 
         wait_seconds = _retry_wait_seconds(resp, base_delay, attempt)
         logger.warning(
-            "套餐查询临时失败，第 %s/%s 次，%.1fs 后重试: %s",
+            "套餐查询临时失败，第 %s/%s 次，%.1fs 后重试（将换出口）: %s proxy=%s",
             attempt,
             attempts,
             wait_seconds,
             last_result.get("error"),
+            route_meta.get("proxy_used") or "-",
         )
         if wait_seconds > 0:
             time.sleep(wait_seconds)

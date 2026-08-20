@@ -3,14 +3,190 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from config import cloakbrowser as _cfg
 
 logger = logging.getLogger(__name__)
+
+
+def stable_cloak_fingerprint_seed(identity: str) -> str:
+    """Return a stable numeric Cloak fingerprint seed for one account identity."""
+    normalized = str(identity or "").strip().lower()
+    digest = hashlib.sha256(f"cloak-fingerprint:{normalized}".encode("utf-8")).digest()
+    return str(int.from_bytes(digest[:8], "big") % 2_000_000_000 + 1)
+
+
+def stable_cloak_device_id(identity: str) -> str:
+    """Keep oai-did stable when the same account retries on another proxy."""
+    normalized = str(identity or "").strip().lower()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"cloak-oai-device:{normalized}"))
+
+
+def prime_cloak_device_id(driver: "CloakSeleniumDriver", device_id: str) -> None:
+    """Seed the browser cookie jar before the first ChatGPT/Auth navigation."""
+    value = str(device_id or "").strip()
+    if not value:
+        return
+    context = driver.context or getattr(driver.page, "context", None)
+    if context is None:
+        return
+    context.add_cookies([
+        {"name": "oai-did", "value": value, "domain": ".chatgpt.com", "path": "/", "secure": True, "sameSite": "Lax"},
+        {"name": "oai-did", "value": value, "domain": ".auth.openai.com", "path": "/", "secure": True, "sameSite": "Lax"},
+        {"name": "oai-did", "value": value, "domain": ".sentinel.openai.com", "path": "/", "secure": True, "sameSite": "Lax"},
+    ])
+
+
+def capture_cloak_environment(
+    driver: "CloakSeleniumDriver",
+    opened: CloakOpenResult | None = None,
+    *,
+    fallback_device_id: str = "",
+) -> dict:
+    """Capture the real secure-page fingerprint used by CloakBrowser.
+
+    The returned browser_profile follows config.browser's key names so later
+    protocol requests can reuse the same UA, Client Hints, locale and timezone.
+    """
+    observed = driver.page.evaluate(
+        """async () => {
+          const uaData = navigator.userAgentData;
+          let high = {};
+          if (uaData && uaData.getHighEntropyValues) {
+            try {
+              high = await uaData.getHighEntropyValues([
+                'architecture', 'bitness', 'model', 'platformVersion',
+                'uaFullVersion', 'fullVersionList'
+              ]);
+            } catch (_) {}
+          }
+          return {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            vendor: navigator.vendor,
+            language: navigator.language,
+            languages: Array.from(navigator.languages || []),
+            webdriver: navigator.webdriver,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            deviceMemory: navigator.deviceMemory || null,
+            screenWidth: screen.width,
+            screenHeight: screen.height,
+            availWidth: screen.availWidth,
+            availHeight: screen.availHeight,
+            colorDepth: screen.colorDepth,
+            pixelDepth: screen.pixelDepth,
+            devicePixelRatio: window.devicePixelRatio,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timezoneOffset: new Date().getTimezoneOffset(),
+            requestIdleCallback: typeof window.requestIdleCallback === 'function',
+            uaData: uaData ? {
+              brands: Array.from(uaData.brands || []),
+              mobile: !!uaData.mobile,
+              platform: uaData.platform || '',
+              high,
+            } : null,
+          };
+        }"""
+    ) or {}
+    ua = str(observed.get("userAgent") or "")
+    version_match = re.search(r"(?:Chrome|CriOS)/(\d+(?:\.\d+){0,3})", ua)
+    full_version = version_match.group(1) if version_match else ""
+    major = full_version.split(".", 1)[0] if full_version else ""
+    ua_data = observed.get("uaData") or {}
+    high = ua_data.get("high") or {}
+    if high.get("uaFullVersion"):
+        full_version = str(high.get("uaFullVersion"))
+        major = full_version.split(".", 1)[0]
+
+    def _brand_list(values) -> str:
+        return ", ".join(
+            f'"{str(item.get("brand") or "")}";v="{str(item.get("version") or "")}"'
+            for item in (values or [])
+            if isinstance(item, dict) and item.get("brand")
+        )
+
+    locale_meta = dict(((opened.raw or {}).get("locale") if opened else {}) or {})
+    geo = dict(locale_meta.get("geo") or {})
+    platform_name = str(ua_data.get("platform") or "")
+    if not platform_name:
+        platform_name = "Windows" if "Windows" in ua else "macOS" if "Macintosh" in ua else ""
+    language = str(observed.get("language") or locale_meta.get("locale") or "en-US")
+    languages = list(observed.get("languages") or [language])
+    accept_language = str(locale_meta.get("accept_language") or language)
+    if "," not in accept_language:
+        accept_language = f"{language},{language.split('-', 1)[0]};q=0.9"
+    timezone_iana = str(observed.get("timezone") or locale_meta.get("timezone") or "UTC")
+    timezone_offset = -int(observed.get("timezoneOffset") or 0)
+    try:
+        from config.browser import TIMEZONE_NAME_BY_IANA
+        timezone_name = str(TIMEZONE_NAME_BY_IANA.get(timezone_iana) or timezone_iana)
+    except Exception:
+        timezone_name = timezone_iana
+    brands = _brand_list(ua_data.get("brands"))
+    full_brands = _brand_list(high.get("fullVersionList")) or brands
+    profile = {
+        "source": "cloak_runtime",
+        "browser_family": "chrome",
+        "browser_os": platform_name,
+        "user_agent": ua,
+        "chrome_major": major,
+        "chrome_full_version": full_version,
+        "navigator_platform": str(observed.get("platform") or ""),
+        "navigator_vendor": str(observed.get("vendor") or "Google Inc."),
+        "navigator_language": language,
+        "navigator_languages": languages,
+        "accept_language": accept_language,
+        "user_agent_data_platform": platform_name,
+        "send_client_hints": bool(ua_data),
+        "sec_ch_ua": brands,
+        "sec_ch_ua_mobile": "?1" if ua_data.get("mobile") else "?0",
+        "sec_ch_ua_platform": f'"{platform_name}"' if platform_name else "",
+        "sec_ch_ua_platform_version": f'"{str(high.get("platformVersion") or "")}"',
+        "sec_ch_ua_arch": f'"{str(high.get("architecture") or "")}"',
+        "sec_ch_ua_bitness": f'"{str(high.get("bitness") or "")}"',
+        "sec_ch_ua_model": f'"{str(high.get("model") or "")}"',
+        "sec_ch_ua_full_version_list": full_brands,
+        "screen_width": int(observed.get("screenWidth") or 0),
+        "screen_height": int(observed.get("screenHeight") or 0),
+        "screen_avail_width": int(observed.get("availWidth") or 0),
+        "screen_avail_height": int(observed.get("availHeight") or 0),
+        "color_depth": int(observed.get("colorDepth") or 24),
+        "pixel_depth": int(observed.get("pixelDepth") or 24),
+        "device_pixel_ratio": float(observed.get("devicePixelRatio") or 1),
+        "hardware_concurrency": int(observed.get("hardwareConcurrency") or 4),
+        "device_memory": int(observed.get("deviceMemory") or 8),
+        "timezone_iana": timezone_iana,
+        "timezone_offset_minutes": timezone_offset,
+        "timezone_name": timezone_name,
+        "geo": geo,
+        "window_feature_flags": {"requestIdleCallback": 1 if observed.get("requestIdleCallback") else 0},
+        "webdriver": bool(observed.get("webdriver")),
+    }
+
+    device_id = str(fallback_device_id or "").strip()
+    try:
+        context = driver.context or getattr(driver.page, "context", None)
+        for cookie in (context.cookies() if context is not None else []):
+            if cookie.get("name") == "oai-did" and cookie.get("value"):
+                device_id = str(cookie.get("value"))
+                break
+    except Exception:
+        pass
+    return {
+        "device_id": device_id,
+        "browser_profile": profile,
+        "summary": (
+            f"{platform_name or '?'} Chrome/{full_version or '?'} "
+            f"{language} {profile['timezone_iana']} "
+            f"{profile['screen_width']}x{profile['screen_height']}"
+        ),
+    }
 
 
 @dataclass
@@ -113,6 +289,20 @@ class CloakElement:
             return self.handle.get_attribute(name)
         except Exception:
             return None
+
+    @property
+    def text(self) -> str:
+        """兼容 Selenium WebElement.text；Cloak/Playwright 元素本身没有 .text。"""
+        try:
+            val = self._eval(
+                "el => String((el && (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '')) || '').trim()"
+            )
+            return str(val or "")
+        except Exception:
+            try:
+                return str(self.get_attribute("value") or self.get_attribute("aria-label") or "")
+            except Exception:
+                return ""
 
 
 class _SwitchTo:
@@ -326,19 +516,31 @@ def _normalize_proxy(proxy: str | None) -> str | None:
 def _detect_cloak_exit_geo(proxy_url: str | None = None) -> dict:
     """按当前/代理出口检测地理信息，供 Cloak 显式 locale/timezone 使用。"""
     try:
-        import requests
+        from curl_cffi import requests as creq
         from config import browser as _browser_cfg
+        from config import proxy as _proxy_cfg
         endpoints = list(getattr(_browser_cfg, "IP_GEO_ENDPOINTS", []) or [])
         timeout = float(getattr(_browser_cfg, "IP_GEO_TIMEOUT", 6) or 6)
     except Exception:
         return {}
+    if proxy_url and bool(getattr(_proxy_cfg, "THORDATA_ENABLED", False)):
+        thor_endpoint = str(getattr(_proxy_cfg, "THORDATA_IPINFO_URL", "") or "").strip()
+        if thor_endpoint:
+            endpoints = [thor_endpoint, *[url for url in endpoints if url != thor_endpoint]]
     proxies = None
     if proxy_url:
         proxies = {"http": proxy_url, "https": proxy_url}
     headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
     for url in endpoints:
         try:
-            resp = requests.get(url, headers=headers, proxies=proxies, timeout=timeout)
+            resp = creq.get(
+                url,
+                headers=headers,
+                proxies=proxies,
+                timeout=timeout,
+                impersonate="chrome146",
+                curl_options=_proxy_cfg.proxy_curl_options(proxy_url),
+            )
             if resp.status_code != 200:
                 continue
             data = resp.json()
@@ -364,11 +566,23 @@ def _detect_cloak_exit_geo(proxy_url: str | None = None) -> dict:
     return {}
 
 
-def _build_cloak_locale_options(proxy_url: str | None = None) -> dict:
+def _build_cloak_locale_options(proxy_url: str | None = None, browser_profile: dict | None = None) -> dict:
     """生成 Cloak/Playwright 双层语言时区配置。"""
     explicit_locale = str(getattr(_cfg, "CLOAK_LOCALE", "") or "").strip()
     explicit_timezone = str(getattr(_cfg, "CLOAK_TIMEZONE", "") or "").strip()
     out = {}
+    if isinstance(browser_profile, dict):
+        saved_locale = str(browser_profile.get("navigator_language") or "").strip()
+        saved_timezone = str(browser_profile.get("timezone_iana") or "").strip()
+        saved_accept_language = str(browser_profile.get("accept_language") or "").strip()
+        if saved_locale:
+            out["locale"] = saved_locale
+        if saved_timezone:
+            out["timezone"] = saved_timezone
+        if saved_accept_language:
+            out["accept_language"] = saved_accept_language
+        if isinstance(browser_profile.get("geo"), dict):
+            out["geo"] = dict(browser_profile.get("geo") or {})
     if explicit_locale:
         out["locale"] = explicit_locale
         # Accept-Language 用 config.browser 自动推断更完整；显式时给一个保守值。
@@ -392,38 +606,65 @@ def _build_cloak_locale_options(proxy_url: str | None = None) -> dict:
     return {k: v for k, v in out.items() if v}
 
 
-def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, CloakOpenResult]:
+def build_cloak_driver(
+    proxy: str | None = None,
+    *,
+    fingerprint_seed: str | None = None,
+    headless: bool | None = None,
+    user_data_dir: str | None = None,
+    browser_profile: dict | None = None,
+    force_direct: bool = False,
+) -> tuple[CloakSeleniumDriver, CloakOpenResult]:
     """启动 CloakBrowser 并返回 Selenium 风格 driver。
 
     proxy=None  时按 config.proxy.PROXY_POOL 随机抽取；
     proxy=""    时显式禁用代理；
     proxy="..." 时使用指定代理。
     """
-    if proxy is None and bool(getattr(_cfg, "CLOAK_USE_PROXY", True)):
-        try:
-            from config.proxy import pick_proxy
-            proxy = pick_proxy()
-        except Exception:
-            proxy = None
+    from config import proxy as proxy_cfg
+    proxy_required = bool(getattr(proxy_cfg, "proxy_required", lambda: False)())
+    if force_direct:
+        proxy = None
+    elif bool(getattr(_cfg, "CLOAK_USE_PROXY", True)) and (
+        proxy is None
+        or (proxy_required and not bool(getattr(proxy_cfg, "proxy_allowed", lambda value: bool(value))(proxy)))
+    ):
+        # 优先健康探测选出口；ThorData 全挂时必须中止，禁止浏览器直连。
+        proxy = proxy_cfg.pick_healthy_proxy(probe=True)
+    if proxy_required and not force_direct and not str(proxy or "").strip():
+        raise RuntimeError("ThorData 没有健康 HTTPS 入口，Cloak 注册已禁止使用本机直连 IP")
     try:
         from cloakbrowser import launch, launch_persistent_context
     except ImportError as exc:
         raise RuntimeError("未安装 cloakbrowser，请执行：pip install cloakbrowser") from exc
 
     launch_args = list(getattr(_cfg, "CLOAK_EXTRA_ARGS", []) or [])
-    seed = str(getattr(_cfg, "CLOAK_FINGERPRINT_SEED", "") or "").strip()
+    seed = str(
+        fingerprint_seed
+        if fingerprint_seed is not None
+        else (getattr(_cfg, "CLOAK_FINGERPRINT_SEED", "") or "")
+    ).strip()
     if seed:
         launch_args.append(f"--fingerprint={seed}")
 
-    proxy_url = _normalize_proxy(proxy) if bool(getattr(_cfg, "CLOAK_USE_PROXY", True)) else None
-    locale_opts = _build_cloak_locale_options(proxy_url)
+    proxy_url = (
+        _normalize_proxy(proxy)
+        if bool(getattr(_cfg, "CLOAK_USE_PROXY", True)) and not force_direct
+        else None
+    )
+    https_proxy = str(proxy_url or "").lower().startswith("https://")
+    if https_proxy and "--ignore-certificate-errors" not in launch_args:
+        launch_args.append("--ignore-certificate-errors")
+    locale_opts = _build_cloak_locale_options(proxy_url, browser_profile=browser_profile)
     # geoip=True 交给 CloakBrowser 根据当前出口 IP 自动匹配 timezone/locale/WebRTC。
     # 之前只有显式 proxy_url 时才开启；如果用户走系统代理/VPN/透明代理，代码层面
     # 看不到 proxy_url，会误关 geoip，导致语言/时区不跟随出口。这里改为完全尊重配置。
     opts = {
-        "headless": bool(getattr(_cfg, "CLOAK_HEADLESS", False)),
+        "headless": bool(getattr(_cfg, "CLOAK_HEADLESS", False)) if headless is None else bool(headless),
         "humanize": bool(getattr(_cfg, "CLOAK_HUMANIZE", True)),
-        "geoip": bool(getattr(_cfg, "CLOAK_GEOIP", True)),
+        # Cloak 0.5.2 的内置 GeoIP 不支持裸 IP HTTPS 代理的 proxy-insecure；
+        # ThorData 时由上面的 curl_cffi 探测真实出口并显式设置 locale/timezone。
+        "geoip": bool(getattr(_cfg, "CLOAK_GEOIP", True)) and not https_proxy,
     }
     if locale_opts.get("locale"):
         opts["locale"] = locale_opts["locale"]
@@ -437,14 +678,19 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
     if license_key:
         opts["license_key"] = license_key
 
-    user_data_dir = str(getattr(_cfg, "CLOAK_USER_DATA_DIR", "") or "").strip()
+    if user_data_dir is None:
+        user_data_dir = str(getattr(_cfg, "CLOAK_USER_DATA_DIR", "") or "").strip()
+    else:
+        user_data_dir = str(user_data_dir or "").strip()
     logger.info(
         "[Cloak] 启动 CloakBrowser：headless=%s humanize=%s geoip=%s proxy=%s locale=%s timezone=%s accept_language=%s persistent=%s",
         opts.get("headless"), opts.get("humanize"), opts.get("geoip"),
-        proxy_url or "无", opts.get("locale") or "自动/默认", opts.get("timezone") or "自动/默认",
+        proxy_cfg._mask_proxy(proxy_url) if proxy_url else "无", opts.get("locale") or "自动/默认", opts.get("timezone") or "自动/默认",
         locale_opts.get("accept_language") or "自动/默认", bool(user_data_dir),
     )
     context_kwargs = {}
+    if https_proxy:
+        context_kwargs["ignore_https_errors"] = True
     if locale_opts.get("locale"):
         context_kwargs["locale"] = locale_opts["locale"]
     if locale_opts.get("timezone"):
@@ -453,7 +699,10 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
         context_kwargs["extra_http_headers"] = {"Accept-Language": locale_opts["accept_language"]}
 
     if user_data_dir:
-        context = launch_persistent_context(user_data_dir, **opts)
+        persistent_opts = dict(opts)
+        if https_proxy:
+            persistent_opts["ignore_https_errors"] = True
+        context = launch_persistent_context(user_data_dir, **persistent_opts)
         page = context.new_page()
         browser = getattr(context, "browser", None) or context
         # persistent context 的 locale/timezone 已通过 launch_persistent_context 参数传入。
@@ -467,4 +716,13 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
     # 避免 Cloak 注册流程里出现 `[Roxy注册]`。
     driver._registration_log_prefix = "[Cloak注册]"
     driver.set_page_load_timeout(int(getattr(_cfg, "CLOAK_SELENIUM_TIMEOUT", 90) or 90))
-    return driver, CloakOpenResult(raw={"driver": "cloakbrowser", "proxy": proxy_url, "locale": locale_opts, "options": {k: v for k, v in opts.items() if k != "license_key"}})
+    return driver, CloakOpenResult(
+        profile_id=f"cloak-{seed}" if seed else "cloakbrowser",
+        raw={
+            "driver": "cloakbrowser",
+            "proxy": proxy_url,
+            "locale": locale_opts,
+            "fingerprint_seed": seed,
+            "options": {k: v for k, v in opts.items() if k != "license_key"},
+        },
+    )

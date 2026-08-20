@@ -24,7 +24,9 @@ EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL"}
 # type 决定前端控件 + 写回时的字面量格式：
 #   bool   -> True/False
 #   int    -> 整数
+#   float  -> 浮点数
 #   str    -> 带引号字符串
+#   select -> 下拉单选（需带 options: [{value,label}]），存储时等同 str
 #   list_str_multiline -> 多行字符串列表（PROXY_POOL 专用，整块替换）
 # ============================================================
 
@@ -263,6 +265,14 @@ EDITABLE_FIELDS = [
         "label": "启用 Flow 触发", "help": "注册成功后自动调用内部 Flow 接口（不影响注册结果）",
     },
     {
+        "key": "ENABLE_BILLING_HANDOFF", "file": "billing_handoff.py", "type": "bool", "group": "功能开关",
+        "label": "注册后打开 Plus 页面", "help": "账号保存成功后打开可见浏览器进入 ChatGPT 官方 Plus 页面；卡资料与订阅由持卡人在官方页面确认",
+    },
+    {
+        "key": "BILLING_HANDOFF_DELAY_SECONDS", "file": "billing_handoff.py", "type": "int", "group": "功能开关",
+        "label": "Plus 页面延迟(秒)", "help": "注册完成后延迟多少秒打开官方 Plus 页面，范围在运行时限制为 0-300",
+    },
+    {
         "key": "ENABLE_HUMANIZE_DELAY", "file": "humanize.py", "type": "bool", "group": "人工节奏",
         "label": "启用随机停顿", "help": "在注册、OTP、授权等步骤之间加入随机等待，更接近人工操作节奏",
     },
@@ -273,15 +283,11 @@ EDITABLE_FIELDS = [
     # ---- 邮箱 / OTP ----
     {
         "key": "USE_EMAIL_SERVICE", "file": "email.py", "type": "bool", "group": "邮箱 / OTP",
-        "label": "自动取邮箱+收码", "help": "True=从邮箱池自动领邮箱并自动收 OTP；False=手动模式：用 REGISTER_EMAIL，OTP 在任务页手填",
+        "label": "自动取邮箱+收码", "help": "True=从邮箱池自动领邮箱并自动收 OTP；False=仅支持 CLI 人工输入",
     },
     {
-        "key": "REGISTER_EMAIL", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "手动注册邮箱", "help": "USE_EMAIL_SERVICE=False 时必填。例如你的 outlook.com 地址；OTP 去网页邮箱看，再回任务页提交",
-    },
-    {
-        "key": "REGISTER_NAME", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "显示名称", "help": "留空则自动生成英文名",
+        "key": "REGISTER_PASSWORD", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "注册密码", "help": "统一设置的 OpenAI 账号密码；留空则每号随机生成并保存在账号 extra.registration_password",
     },
     {
         "key": "OTP_MAX_WAIT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
@@ -292,8 +298,52 @@ EDITABLE_FIELDS = [
         "label": "OTP 轮询间隔(秒)", "help": "每隔多少秒查一次新邮件",
     },
     {
-        "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail",
+        "key": "EMAIL_SOURCE", "file": "email.py", "type": "select", "group": "邮箱 / OTP",
+        "label": "邮箱来源", "help": "注册邮箱与收码来源，下拉单选保存后立即生效；如需多来源逗号分隔按顺序兜底，可手动在 .env 填（如 generic_api,throwaway）",
+        "options": [
+            {"value": "outlook", "label": "Outlook 账号池"},
+            {"value": "generic_api", "label": "通用 API 邮箱池"},
+            {"value": "cloudflare_domain", "label": "Cloudflare 域名邮箱(转发QQ)"},
+            {"value": "cloudflare", "label": "Cloudflare Worker 临时邮箱"},
+            {"value": "gptmail", "label": "GPTMail 临时邮箱"},
+            {"value": "mailnest", "label": "MailNest 迈巢临时邮箱"},
+            {"value": "cloudmail", "label": "CloudMail 临时邮箱"},
+            {"value": "throwaway", "label": "Throwaway 临时邮箱"},
+            {"value": "gonebox", "label": "GoneBox 临时邮箱"},
+        ],
+    },
+    {
+        "key": "THROWAWAY_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "Throwaway API 地址", "help": "默认 https://www.throwaway.io/api/ai/v1；选择 throwaway 时使用",
+    },
+    {
+        "key": "THROWAWAY_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "Throwaway 超时(秒)", "help": "创建邮箱、读取收件箱和邮件详情的单次 HTTP 超时",
+    },
+    {
+        "key": "THROWAWAY_DOMAIN_CACHE_SECONDS", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "Throwaway 域名缓存(秒)", "help": "并发注册线程共用域名快照；每个邮箱仍随机选择后缀",
+    },
+    {
+        "key": "GONEBOX_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "GoneBox API 地址", "help": "默认 https://api.gonebox.email/api/v1；选择 gonebox 时使用",
+    },
+    {
+        "key": "GONEBOX_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "GoneBox API Key", "help": "匿名可留空；付费套餐可填写 API Key，保存在 .env",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "GONEBOX_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "GoneBox 请求超时(秒)", "help": "创建邮箱、读取收件箱和邮件详情的单次 HTTP 超时",
+    },
+    {
+        "key": "GONEBOX_DEFAULT_DOMAIN", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "GoneBox 默认域名", "help": "gonebox.email、sumiu.email 或 nemexiste.email",
+    },
+    {
+        "key": "GONEBOX_DOMAIN_CACHE_SECONDS", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "GoneBox 域名缓存(秒)", "help": "并发注册线程共用域名快照",
     },
     {
         "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
@@ -425,17 +475,70 @@ EDITABLE_FIELDS = [
 
     # ---- 代理池 ----
     {
+        "key": "THORDATA_ENABLED", "file": "proxy.py", "type": "bool", "group": "代理池",
+        "label": "启用 ThorData", "help": "开启后注册、套餐查询和协议登录默认使用 ThorData HTTPS 入口，失败时禁止本机直连",
+    },
+    {
+        "key": "THORDATA_CUSTOMER", "file": "proxy.py", "type": "str", "group": "代理池",
+        "label": "ThorData 客户标识", "help": "get-ip.thordata.net 的 td-customer，仅保存到本机 .env",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "THORDATA_COUNTRY", "file": "proxy.py", "type": "str", "group": "代理池",
+        "label": "ThorData 出口国家", "help": "默认 US；入口健康检查会校验真实出口国家",
+    },
+    {
+        "key": "THORDATA_NUMBER", "file": "proxy.py", "type": "int", "group": "代理池",
+        "label": "ThorData 入口数量", "help": "每次从 API 刷新的 HTTPS 入口数量，建议 8-30",
+    },
+    {
+        "key": "THORDATA_POOL_TTL", "file": "proxy.py", "type": "float", "group": "代理池",
+        "label": "ThorData 刷新周期(秒)", "help": "动态入口缓存时间，到期后自动重新提取",
+    },
+    {
+        "key": "THORDATA_PROXY_INSECURE", "file": "proxy.py", "type": "bool", "group": "代理池",
+        "label": "忽略入口证书名", "help": "裸 IP HTTPS 入口必须开启；只关闭代理入口证书校验，不关闭目标站 TLS 校验",
+    },
+    {
+        "key": "THORDATA_PURITY_CHECK", "file": "proxy.py", "type": "bool", "group": "代理池",
+        "label": "查询出口纯净度", "help": "通过当前 ThorData 代理查询 proxycheck/blackbox；会增加选代理耗时",
+    },
+    {
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "每行一个代理 URL，留空行会被忽略；为空则不使用代理",
+        "label": "手动代理池(兼容)", "help": "仅 THORDATA_ENABLED=False 时使用；ThorData 开启后由 API 动态覆盖",
+    },
+    {
+        "key": "PROXY_PROBE_TIMEOUT", "file": "proxy.py", "type": "float", "group": "代理池",
+        "label": "出口探测超时(秒)", "help": "选 IP 时探测延迟上限；超过视为卡顿并换下一个。建议 3-6",
+    },
+    {
+        "key": "PROXY_PICK_PROBE_CANDIDATES", "file": "proxy.py", "type": "int", "group": "代理池",
+        "label": "选IP探测候选数", "help": "启动注册时最多探测几个出口再选用。建议 3-6",
+    },
+    {
+        "key": "PROXY_TEMP_BAN_SECONDS", "file": "proxy.py", "type": "float", "group": "代理池",
+        "label": "卡顿IP拉黑(秒)", "help": "探测失败或流程中判定卡顿后，临时不抽该出口。建议 120-300",
+    },
+    {
+        "key": "PROXY_SWITCH_MAX", "file": "proxy.py", "type": "int", "group": "代理池",
+        "label": "卡顿换IP次数", "help": "注册中因 IP 卡顿自动换出口重开浏览器的最大次数。建议 2-4",
     },
     {
         "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",
-        "label": "套餐/Agent网络模式", "help": "用于查套餐和生成 Agent Token；auto=本地代理可用则走代理、未监听则直连；proxy=强制代理；direct=强制直连",
+        "label": "套餐/Agent网络模式", "help": "ThorData 开启时强制代理；关闭 ThorData 后可选 auto/proxy/direct",
     },
     {
         "key": "PLAN_CHECK_PROXY", "file": "proxy.py", "type": "str", "group": "代理池",
         "label": "套餐/Agent专用代理", "help": "用于查套餐和生成 Agent Token；留空时 auto/proxy 从代理池选择。可能包含认证信息，仅保存到 .env",
         "storage": "env", "secret": True,
+    },
+    {
+        "key": "PLAN_CHECK_THORDATA_COUNTRY", "file": "proxy.py", "type": "str", "group": "代理池",
+        "label": "试用查询出口国家", "help": "套餐与 Plus 试用资格查询使用的独立 ThorData 国家池；默认 JP，不会修改注册出口国家",
+    },
+    {
+        "key": "PLAN_CHECK_THORDATA_NUMBER", "file": "proxy.py", "type": "int", "group": "代理池",
+        "label": "试用查询JP入口数", "help": "独立查询池每次提取的入口数量；默认 3",
     },
     {
         "key": "PLAN_CHECK_TIMEOUT", "file": "proxy.py", "type": "float", "group": "代理池",
@@ -471,17 +574,76 @@ EDITABLE_FIELDS = [
     },
     # ---- 提链 ----
     {
+        "key": "EXTRACT_LINK_ENABLED", "file": "extract_link.py", "type": "bool", "group": "提链",
+        "label": "启用提链", "help": "关闭时停止并拒绝所有手动、批量和套餐后的自动提链任务",
+    },
+    {
         "key": "EXTRACT_LINK_API_BASE", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链服务地址", "help": "填写提链服务 API 地址",
+        "label": "提链服务地址",
+        "help": "link-pp 内置服务填 http://127.0.0.1:5000/link-pp；也兼容外部 BurstPro 和 Link Atelier",
+    },
+    {
+        "key": "EXTRACT_LINK_PROVIDER", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "提链服务类型", "help": "linkpp=本地 PayPal BA 提链；auto=按地址识别；另兼容 workbench/burstpro/legacy",
     },
     {
         "key": "EXTRACT_LINK_CDK", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链 CDK", "help": "创建提链任务和监听任务事件使用；成功提链扣 1 次",
+        "label": "提链 CDK", "help": "BurstPro UPI CDK；POST /api/activate 成功锁定 1 次，失败自动释放；check-cdk 不扣次",
         "storage": "env", "secret": True,
     },
     {
         "key": "EXTRACT_LINK_TYPE", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链类型", "help": "支持 pix / upi / kakao_pay / ideal",
+        "label": "提链类型", "help": "link-pp 使用 paypal；其他服务支持 pix / upi / kakao_pay / ideal",
+    },
+    {
+        "key": "EXTRACT_LINK_CHECKOUT_PROXY_POOL", "file": "extract_link.py", "type": "list_str_multiline", "group": "提链",
+        "label": "Checkout 代理池", "help": "Link Atelier 每行一个代理；支持 host:port:user:password 或完整 HTTP 代理 URL",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "EXTRACT_LINK_UPDATE_PROXY_POOL", "file": "extract_link.py", "type": "list_str_multiline", "group": "提链",
+        "label": "Update 代理池", "help": "Link Atelier Checkout Update 使用的代理池；每行一个代理",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "EXTRACT_LINK_WORKBENCH_COUNTRY", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "工作台账单国家", "help": "可留空；例如 GB。留空时由工作台或凭据默认值决定",
+    },
+    {
+        "key": "EXTRACT_LINK_WORKBENCH_PAYMENT_METHOD", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "工作台支付方式", "help": "可留空；例如 paypal / gopay / gcash",
+    },
+    {
+        "key": "EXTRACT_LINK_WORKBENCH_APPLY_UPDATE", "file": "extract_link.py", "type": "bool", "group": "提链",
+        "label": "执行 Checkout Update", "help": "Link Atelier 是否在 Checkout 后执行 Update；开启时必须有 Update 代理池",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_COUNTRY", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "link-pp 代理国家", "help": "PayPal 提链代理出口国家，默认 BR",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_BILLING_COUNTRY", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "link-pp 账单国家", "help": "PayPal 提链账单国家，默认 DE（EUR）",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_CHECKOUT_ATTEMPTS", "file": "extract_link.py", "type": "int", "group": "提链",
+        "label": "link-pp Checkout 次数", "help": "单账号最多创建 Checkout 的次数，默认 3",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_PROVIDER_ATTEMPTS", "file": "extract_link.py", "type": "int", "group": "提链",
+        "label": "link-pp PayPal 尝试次数", "help": "每个任务的 PayPal 提链尝试次数，默认 5",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_STRIPE_CHECKOUT", "file": "extract_link.py", "type": "bool", "group": "提链",
+        "label": "link-pp Hosted Stripe", "help": "启用当前 cs_live_ Checkout 流程；关闭时仅接受旧 OAICS 流程",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_STRIPE_ENGINE", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "link-pp Stripe 引擎", "help": "go 或 python；Go 引擎在独立进程执行 Stripe 请求",
+    },
+    {
+        "key": "EXTRACT_LINK_LINKPP_STRIPE_PROMO_STRATEGY", "file": "extract_link.py", "type": "str", "group": "提链",
+        "label": "link-pp 优惠策略", "help": "mixed、upfront 或 post_update；默认 mixed",
     },
     {
         "key": "EXTRACT_LINK_WORKERS", "file": "extract_link.py", "type": "int", "group": "提链",
@@ -542,15 +704,19 @@ EDITABLE_FIELDS = [
 
     {
         "key": "SMS_PROVIDER", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "接码通道", "help": "grizzly / l / h；l 使用 L_API.md，h 使用 H_API.md 定义的本地取号服务",
+        "label": "接码通道", "help": "hero / grizzly / l / h；hero=HeroSMS，grizzly=GrizzlySMS，l/h 见本地 API 文档",
+    },
+    {
+        "key": "SMS_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
+        "label": "接码 API 基址", "help": "Hero: https://hero-sms.com/stubs/handler_api.php；Grizzly: https://api.grizzlysms.com/stubs/handler_api.php",
     },
     {
         "key": "SMS_COUNTRY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "国家代码", "help": "传给接码平台的 country；GrizzlySMS 常用：美国=187；H 通道作为 H_API.md 的 country",
+        "label": "国家代码", "help": "传给接码平台的 country；常用美国=187；H 通道作为 H_API.md 的 country",
     },
     {
         "key": "SMS_SERVICE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "服务/项目代码", "help": "GrizzlySMS/L 作为 service；H 通道作为 H_API.md 的 projectId",
+        "label": "服务/项目代码", "help": "Hero/Grizzly 服务码（OpenAI 常用 dr）；L 为 service；H 为 projectId",
     },
     {
         "key": "SMS_MAX_RETRIES", "file": "codex.py", "type": "int", "group": "接码平台",
@@ -558,11 +724,15 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "SMS_CODE_WAIT", "file": "codex.py", "type": "int", "group": "接码平台",
-        "label": "单号等短信(秒)", "help": "单个号等待短信到达的最长秒数，超时则换号",
+        "label": "单号等短信(秒)", "help": "单个号等待短信最长秒数，超时立刻换号。建议 15–30；默认 20（别再设 120）",
+    },
+    {
+        "key": "SMS_POLL_INTERVAL", "file": "codex.py", "type": "int", "group": "接码平台",
+        "label": "短信轮询间隔(秒)", "help": "查接码平台是否到码的间隔；配合短等待建议 2",
     },
     {
         "key": "SMS_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "GrizzlySMS API密钥", "help": "GrizzlySMS 平台 API Key，保存在 .env（SMS_API_KEY），不写回 config/*.py",
+        "label": "接码 API 密钥", "help": "HeroSMS / GrizzlySMS 等平台 API Key，保存在 .env（SMS_API_KEY），不写回 config/*.py",
         "storage": "env", "secret": True,
     },
     {
@@ -594,6 +764,31 @@ EDITABLE_FIELDS = [
     {
         "key": "L_PHONE_PREFIX", "file": "codex.py", "type": "str", "group": "接码平台",
         "label": "L 号码前缀", "help": "L 返回号码不含国家码时填写，例如美国 10 位本地号填 1；留空则不补",
+    },
+    # ---- 号池 ----
+    {
+        "key": "POOL_ENABLED", "file": "pool.py", "type": "bool", "group": "号池",
+        "label": "启用号池", "help": "关闭后 acquire/switch 直接返回不可用，巡检线程不执行",
+    },
+    {
+        "key": "POOL_QUOTA_THRESHOLD_PERCENT", "file": "pool.py", "type": "float", "group": "号池",
+        "label": "额度剩余阈值(%)", "help": "primary_remaining_percent 低于或等于该值即视为额度耗尽，不再分配",
+    },
+    {
+        "key": "POOL_ALLOW_UNKNOWN_QUOTA", "file": "pool.py", "type": "bool", "group": "号池",
+        "label": "无额度数据默认可用", "help": "没查过额度/查询失败的账号默认按可用分配；关闭后视为不可用",
+    },
+    {
+        "key": "POOL_PROBE_INTERVAL_SECONDS", "file": "pool.py", "type": "int", "group": "号池",
+        "label": "巡检间隔(秒)", "help": "号池后台线程周期对过期未查额度的账号入队额度检查；0=关闭巡检",
+    },
+    {
+        "key": "POOL_PROBE_STALE_SECONDS", "file": "pool.py", "type": "int", "group": "号池",
+        "label": "额度过期判定(秒)", "help": "巡检时账号最近一次成功查额度超过该时长才重新入队，默认 12 小时",
+    },
+    {
+        "key": "POOL_ACQUIRE_STRATEGY", "file": "pool.py", "type": "str", "group": "号池",
+        "label": "分配策略", "help": "round_robin=轮询（避免同一账号连续分配）；random=随机",
     },
 ]
 
@@ -763,7 +958,7 @@ def get_config() -> list[dict]:
         else:
             value = fallback
 
-        if field["type"] in ("str", "list_str_multiline"):
+        if field["type"] in ("str", "select", "list_str_multiline"):
             value = _normalize_config_value(value, field["type"])
         item = dict(field)
         item["storage"] = "env"
@@ -784,7 +979,7 @@ _PLACEHOLDER_EMPTY = {
 
 def _normalize_config_value(value, vtype: str):
     """把前端/历史占位空值规范化，避免 '-' 被当成真实配置。"""
-    if vtype == "str":
+    if vtype in ("str", "select"):
         s = "" if value is None else str(value).strip()
         if s.lower() in {x.lower() for x in _PLACEHOLDER_EMPTY}:
             return ""
@@ -818,7 +1013,7 @@ def _format_literal(value, vtype: str) -> str:
         return str(int(value))
     if vtype == "float":
         return repr(float(value))
-    if vtype == "str":
+    if vtype in ("str", "select"):
         s = str(value)
         # 用 repr 保证转义安全，但统一成双引号风格
         return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -895,7 +1090,7 @@ def _format_env_value(value, vtype: str) -> str:
     if vtype == "list_str_multiline":
         lines = _normalize_config_value(value, vtype)
         return "\n".join(lines) if lines else "[]"
-    if vtype == "str":
+    if vtype in ("str", "select"):
         return _normalize_config_value(value, vtype)
     return "" if value is None else str(value)
 

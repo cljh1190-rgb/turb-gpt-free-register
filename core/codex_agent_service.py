@@ -125,13 +125,39 @@ def _run_generate(*, account_id: int, email: str, access_token: str, trigger: st
 
         # 和查套餐一致解析网络路径；每个账号独立创建 BrowserSession，
         # 从而得到独立 oai-did / oai-session-id / Datadog trace / 浏览器画像 / 代理出口。
-        route = resolve_plan_check_route(None)
+        # 严禁 10808/7897：历史日志里走系统代理会 curl(28) 15s 超时。
+        failed_proxies: list[str] = []
+        # Codex Agent 保持注册的全局代理策略；只有套餐/试用资格查询强制使用 JP 专用池。
+        route = resolve_plan_check_route(None, use_plan_country=False)
+        if route.get("proxy") and getattr(proxy_cfg, "_is_forbidden_local_proxy", None) and proxy_cfg._is_forbidden_local_proxy(route["proxy"]):
+            logger.warning("[CodexAgent] 路由命中禁止端口 %s，强制改抽注册专用池", route.get("proxy_used") or route.get("proxy"))
+            alt = str(proxy_cfg.pick_proxy() or "").strip()
+            route = {
+                "proxy": alt,
+                "proxy_mode": "auto",
+                "network_route": "proxy" if alt else "direct",
+                "proxy_used": alt or None,
+                "proxy_fallback_reason": "blocked_system_proxy_10808",
+            }
         route_meta = {k: v for k, v in route.items() if k != "proxy"}
         timeout_seconds, attempts, retry_delay = _agent_request_settings()
+        # 至少 3 次：同一死节点连撞两次不够换出口
+        attempts = max(attempts, 3)
         last_exc: Exception | None = None
         auth_json = None
         for attempt in range(1, attempts + 1):
             attempt_count = attempt
+            if attempt > 1:
+                alt = str(proxy_cfg.pick_proxy(exclude=failed_proxies) or "").strip()
+                if alt:
+                    route = {
+                        "proxy": alt,
+                        "proxy_mode": route_meta.get("proxy_mode") or "auto",
+                        "network_route": "proxy",
+                        "proxy_used": alt,
+                        "proxy_fallback_reason": f"retry_switch attempt={attempt}",
+                    }
+                    route_meta = {k: v for k, v in route.items() if k != "proxy"}
             _wait_for_rate_slot()
             try:
                 env = BrowserSession(proxy=route["proxy"], detect_exit_geo=False)
@@ -156,8 +182,12 @@ def _run_generate(*, account_id: int, email: str, access_token: str, trigger: st
                 break
             except Exception as exc:
                 last_exc = exc
+                used = str(route.get("proxy") or "").strip()
+                if used and used not in failed_proxies:
+                    failed_proxies.append(used)
                 try:
-                    env.session.close()
+                    if env is not None:
+                        env.session.close()
                 except Exception:
                     pass
                 env = None
@@ -165,12 +195,13 @@ def _run_generate(*, account_id: int, email: str, access_token: str, trigger: st
                     raise
                 wait_seconds = min(30.0, retry_delay * attempt)
                 logger.warning(
-                    "[CodexAgent] 生成临时失败，第 %s/%s 次，%.1fs 后重试: %s: %s",
+                    "[CodexAgent] 生成临时失败，第 %s/%s 次，%.1fs 后换出口重试: %s: %s (failed_proxies=%s)",
                     attempt,
                     attempts,
                     wait_seconds,
                     type(exc).__name__,
                     str(exc)[:180],
+                    len(failed_proxies),
                 )
                 if wait_seconds > 0:
                     time.sleep(wait_seconds)

@@ -58,6 +58,93 @@ def _registration_recheck_delay() -> float:
     return _float_setting("PLAN_CHECK_REGISTRATION_RECHECK_DELAY", 2.0, 0.0, 30.0)
 
 
+def _auto_delete_invalid_account(*, account_id: int, email: str, result: dict) -> bool:
+    """删除已被 ChatGPT 明确判定失效的本地账号记录。
+
+    仅接受 account_validity=invalid；代理封禁、403、超时等不确定结果必须保留。
+    """
+    if str(result.get("account_validity") or "").strip().lower() != "invalid":
+        return False
+    try:
+        deleted = bool(db.delete_account(acc_id=account_id))
+    except Exception as exc:
+        logger.warning("[Plan] 失效账号自动删除失败: id=%s email=%s: %s", account_id, email, exc)
+        return False
+    if deleted:
+        logger.warning(
+            "[Plan] 检测到账号已失效，已自动删除本地记录: id=%s email=%s error=%s",
+            account_id,
+            email,
+            result.get("error") or "token invalid",
+        )
+    return deleted
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    import os
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def _maybe_auto_extract_after_plan(
+    *,
+    account_id: int,
+    email: str,
+    access_token: str,
+    plan_result: dict,
+    trigger: str,
+) -> None:
+    """套餐查询确认 free+可试用后，自动入队提链（BurstPro UPI 等）。
+
+    开关：ENABLE_EXTRACT_AUTO（默认 False）。工作台仅需要 API Base；其他 provider 还需要 CDK。
+    """
+    if not _env_flag("ENABLE_EXTRACT_AUTO", False):
+        return
+    if not bool(plan_result.get("plus_trial_eligible")):
+        return
+    plan = str(plan_result.get("current_plan_type") or plan_result.get("plan_type") or "").lower()
+    if plan and plan != "free":
+        return
+    token = str(access_token or "").strip()
+    if not token:
+        return
+    try:
+        from core import extract_link_service
+        if not extract_link_service.extraction_enabled():
+            return
+        # 配置不齐时静默跳过，不打断套餐查询主流程
+        try:
+            api_base = extract_link_service._api_base()
+            if extract_link_service._provider(api_base) not in {"workbench", "linkpp"}:
+                extract_link_service._cdk()
+        except Exception as cfg_exc:
+            logger.info("[提链] 自动提链跳过（未配置）: %s, %s", email, cfg_exc)
+            return
+        queued = extract_link_service.enqueue_account_extract(
+            account_id=int(account_id),
+            email=email or "",
+            access_token=token,
+            trigger=f"plan_auto:{trigger}",
+            link_type=None,  # 走 EXTRACT_LINK_TYPE
+        )
+        if queued.get("accepted"):
+            logger.info("[提链] 套餐确认可试用，已自动入队: id=%s email=%s", account_id, email)
+        elif queued.get("busy"):
+            logger.info("[提链] 账号已在提链中，跳过自动入队: id=%s email=%s", account_id, email)
+        else:
+            logger.warning(
+                "[提链] 自动入队未接受: id=%s email=%s err=%s",
+                account_id, email, queued.get("error"),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[提链] 自动入队异常（不影响套餐结果）: %s, %s: %s",
+            email, type(exc).__name__, str(exc)[:180],
+        )
+
+
 def _run_plan_check(
     *,
     account_id: int,
@@ -66,6 +153,8 @@ def _run_plan_check(
     trigger: str,
     proxy: str | None,
     timezone_offset_min: str,
+    device_id: str | None,
+    browser_profile: dict | None,
 ) -> dict:
     try:
         if not db.mark_account_plan_check_running(account_id):
@@ -76,6 +165,9 @@ def _run_plan_check(
             access_token,
             proxy=proxy,
             timezone_offset_min=timezone_offset_min,
+            device_id=device_id,
+            browser_profile=browser_profile,
+            include_plus_trial=not str(trigger or "").startswith("validity"),
         )
 
         recheck_delay = _registration_recheck_delay()
@@ -94,7 +186,10 @@ def _run_plan_check(
                 access_token,
                 proxy=proxy,
                 timezone_offset_min=timezone_offset_min,
+                device_id=device_id,
+                browser_profile=browser_profile,
                 max_attempts=1,
+                include_plus_trial=not str(trigger or "").startswith("validity"),
             )
             if recheck_result.get("ok"):
                 result = recheck_result
@@ -106,6 +201,7 @@ def _run_plan_check(
                 )
 
         db.update_account_plan_check(acc_id=account_id, result=result)
+        _auto_delete_invalid_account(account_id=account_id, email=email, result=result)
         if result.get("ok"):
             logger.info(
                 "[Plan] 后台查询成功: %s, plan=%s, plus_trial=%s, trigger=%s",
@@ -114,6 +210,16 @@ def _run_plan_check(
                 bool(result.get("plus_trial_eligible")),
                 trigger,
             )
+            # free + 可 Plus 试用 → 自动入队 BurstPro/提链（需已配置 API BASE + CDK）
+            # 独立 PLUS 查询页只负责识别套餐，不应因为查到试用资格而自动提链。
+            if not str(trigger or "").startswith("plus_query_"):
+                _maybe_auto_extract_after_plan(
+                    account_id=account_id,
+                    email=email,
+                    access_token=access_token,
+                    plan_result=result,
+                    trigger=trigger,
+                )
         else:
             logger.warning(
                 "[Plan] 后台查询失败: %s, trigger=%s, error=%s",
@@ -146,6 +252,8 @@ def enqueue_account_plan_check(
     trigger: str,
     proxy: str | None = None,
     timezone_offset_min: str = "-",
+    device_id: str | None = None,
+    browser_profile: dict | None = None,
 ) -> dict:
     """把查询放入统一线程池；重复查询或队列满时不提交。"""
     account_id = int(account_id)
@@ -169,6 +277,8 @@ def enqueue_account_plan_check(
             trigger=str(trigger or "manual"),
             proxy=proxy,
             timezone_offset_min=str(timezone_offset_min or "-"),
+            device_id=str(device_id or "").strip() or None,
+            browser_profile=dict(browser_profile) if isinstance(browser_profile, dict) else None,
         )
     except Exception as exc:
         _QUEUE_SLOTS.release()

@@ -22,6 +22,17 @@ class ChatgptAuthContextTests(unittest.TestCase):
         self.assertEqual(qs["login_hint"], ["user@example.com"])
         self.assertEqual(qs["ccaps"], ["login_methods"])
 
+    def test_existing_opaque_state_is_kept_byte_for_byte(self):
+        # ``+`` is deliberately left unescaped here: parse_qs/urlencode would
+        # silently turn it into a space and invalidate the OAuth transaction.
+        url = (
+            "https://auth.openai.com/api/accounts/authorize?"
+            "client_id=app_x&state=a+b%2Fc%3D%3D&state=second%2Bvalue"
+        )
+        out = _ensure_authorize_context(url, _Session(), "user@example.com")
+        self.assertTrue(out.startswith(url + "&"))
+        self.assertIn("state=a+b%2Fc%3D%3D&state=second%2Bvalue", out)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -366,6 +366,63 @@
     .jobs-toolbar-v2 .jobs-tb-btn--good:disabled {
       color: #a3c4ad; background: #f5faf7; border-color: #dce8e0;
     }
+    .mail-link-register {
+      margin: 0 16px 14px; padding: 16px;
+      border: 1px solid #d9e7ff; border-radius: 8px; background: #f7faff;
+    }
+    .mail-link-register__head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 16px; margin-bottom: 10px;
+    }
+    .mail-link-register__title { color: #303133; font-size: 15px; font-weight: 600; line-height: 1.4; }
+    .mail-link-register__desc { margin-top: 3px; color: #8492a6; font-size: 13px; line-height: 1.5; }
+    .mail-link-register textarea {
+      display: block; width: 100%; min-height: 92px; resize: vertical;
+      border: 1px solid #dcdfe6; border-radius: 6px; background: #fff;
+      padding: 10px 12px; color: #303133; font: 13px/1.55 Consolas, "Microsoft YaHei", sans-serif;
+      outline: none; box-sizing: border-box;
+    }
+    .mail-link-register textarea:focus { border-color: #409eff; box-shadow: 0 0 0 2px rgba(64,158,255,.12); }
+    .mail-link-register__actions {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-top: 10px; flex-wrap: wrap;
+    }
+    .mail-link-register__hint { color: #8492a6; font-size: 12px; line-height: 1.5; }
+    .mail-link-register .jobs-tb-btn {
+      min-height: 38px; border: 1px solid #377DFF; border-radius: 6px;
+      padding: 8px 18px; background: #377DFF; color: #fff;
+      font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap;
+    }
+    .mail-link-register .jobs-tb-btn:hover:not(:disabled) { background: #5a94ff; border-color: #5a94ff; }
+    .mail-link-register .jobs-tb-btn:disabled { color: #9CBFFF; background: #EBF2FF; border-color: #D7E5FF; cursor: not-allowed; }
+    .mail-link-register-page { max-width: 980px; }
+    .mail-link-register-page .mail-link-register { margin: 0; padding: 22px; background: #fff; }
+    .mail-link-register-page .mail-link-register textarea { min-height: 260px; }
+    .mail-link-register-controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .mail-link-register-field { display: grid; gap: 6px; color: #606266; font-size: 13px; }
+    .mail-link-register-field input {
+      width: 140px; height: 38px; padding: 0 12px; box-sizing: border-box;
+      border: 1px solid #dcdfe6; border-radius: 6px; outline: none;
+      color: #303133; background: #fff; font: inherit;
+    }
+    .mail-link-register-field input:focus { border-color: #409eff; box-shadow: 0 0 0 2px rgba(64,158,255,.12); }
+    .mail-link-register .jobs-tb-btn.mail-link-register-secondary {
+      color: #606266; background: #fff; border-color: #dcdfe6;
+    }
+    .mail-link-register .jobs-tb-btn.mail-link-register-secondary:hover:not(:disabled) {
+      color: #409eff; background: #ecf5ff; border-color: #c6e2ff;
+    }
+    .mail-link-register-message { margin-top: 14px; }
+    .mail-link-register-notes {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px; margin-top: 16px;
+    }
+    .mail-link-register-note {
+      padding: 14px 16px; border: 1px solid #ebeef5; border-radius: 8px; background: #f8fafc;
+    }
+    .mail-link-register-note strong { display: block; margin-bottom: 5px; color: #303133; font-size: 14px; }
+    .mail-link-register-note span { color: #8492a6; font-size: 12px; line-height: 1.55; }
+    @media (max-width: 760px) { .mail-link-register-notes { grid-template-columns: 1fr; } }
     .jobs-toolbar-v2 .jobs-tb-field {
       display: inline-flex; align-items: center; gap: 8px;
       color: #606266; font-size: 14px; white-space: nowrap;
@@ -531,13 +588,6 @@
     .jobs-table-v2 .jobs-v2-op--retry:hover { background: #2bb8a6; color: #fff; }
     .jobs-table-v2 .jobs-v2-op--stop { background: #fff7e6; color: #fa8c16; }
     .jobs-table-v2 .jobs-v2-op--stop:hover { background: #fa8c16; color: #fff; }
-    .jobs-table-v2 .jobs-v2-op--otp { background: #ecf5ff; color: #409eff; }
-    .jobs-table-v2 .jobs-v2-op--otp:hover { background: #409eff; color: #fff; }
-    .jobs-table-v2 .manual-otp-input--v2 {
-      width: 86px; height: 32px; margin-right: 8px; padding: 0 8px;
-      border: 1px solid #dcdfe6; border-radius: 6px; font: inherit; font-size: 12px;
-    }
-    .jobs-table-v2 .col-actions { width: 280px; }
     .jobs-table-v2 .jobs-v2-op--del { background: #ffe0e0; color: #e64545; }
     .jobs-table-v2 .jobs-v2-op--del:hover { background: #e64545; color: #fff; }
     .jobs-table-v2 .jobs-v2-op:disabled { opacity: .5; cursor: not-allowed; }
@@ -1638,6 +1688,9 @@
     .config-ep-select-item.is-active { background: #f0f2f5; color: #303133; font-weight: 500; }
     .config-select-v2-field .config-ep-select { margin-top: 6px; }
     .config-select-v2-field .config-ep-select-btn { font-weight: 500; color: #606266; }
+    .jobs-toolbar-v2 .config-ep-select { width: 178px; margin-top: 0; }
+    .jobs-toolbar-v2 .config-ep-select-btn { min-height: 40px; border-radius: 6px; font-weight: 400; }
+    .jobs-toolbar-v2 .email-mode-tb .config-ep-select-item { justify-content: flex-start; }
     .config-sections-v2 { display: grid; gap: 16px; }
     .config-section-v2 {
       scroll-margin-top: 20px;
@@ -1810,6 +1863,93 @@
       .config-overview-v2-title { font-size: 24px; }
     }
 
+    /* ---- 独立 PLUS 查询 ---- */
+    .plus-check-grid { display: grid; grid-template-columns: minmax(340px, .82fr) minmax(520px, 1.5fr); gap: 16px; }
+    .plus-check-card { border: 1px solid #ebeef5; border-radius: 10px; background: #fff; box-shadow: 0 0 12px rgba(0,0,0,.04); overflow: hidden; }
+    .plus-check-card-head { padding: 18px 20px 14px; border-bottom: 1px solid #ebeef5; }
+    .plus-check-card-head h2 { margin: 0; font-size: 16px; color: #303133; }
+    .plus-check-card-head p { margin: 7px 0 0; color: #909399; font-size: 12px; line-height: 1.65; }
+    .plus-check-import { padding: 18px 20px 20px; display: grid; gap: 12px; }
+    .plus-check-import textarea { width: 100%; min-height: 330px; resize: vertical; padding: 12px 14px; border: 1px solid #dcdfe6; border-radius: 7px; background: #fff; color: #303133; font: 12px/1.6 Consolas, Monaco, monospace; outline: none; }
+    .plus-check-import textarea:focus { border-color: #377DFF; box-shadow: 0 0 0 2px rgba(55,125,255,.12); }
+    .plus-check-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .plus-check-result { min-height: 20px; color: #606266; font-size: 12px; line-height: 1.6; white-space: pre-line; }
+    .plus-check-result.is-error { color: #f56c6c; }
+    .plus-check-table-toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid #ebeef5; }
+    .plus-check-table-toolbar input { max-width: 260px; min-height: 32px; }
+    .plus-check-summary { color: #606266; font-size: 12px; white-space: nowrap; }
+    .plus-check-table-wrap { overflow: auto; max-height: calc(100vh - 260px); }
+    .plus-check-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+    .plus-check-table th, .plus-check-table td { padding: 11px 12px; border-bottom: 1px solid #ebeef5; text-align: left; vertical-align: middle; }
+    .plus-check-table th { position: sticky; top: 0; z-index: 1; background: #f7f9fc; color: #606266; font-weight: 600; }
+    .plus-check-table .pc-email { width: 25%; word-break: break-all; }
+    .plus-check-table .pc-plan { width: 12%; }
+    .plus-check-table .pc-result { width: 18%; }
+    .plus-check-table .pc-quota { width: 25%; }
+    .plus-check-table .pc-time { width: 15%; }
+    .plus-check-table .pc-op { width: 230px; text-align: right; }
+    .plus-check-table .pc-op button + button { margin-left: 6px; }
+    .plus-check-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+    .plus-check-badge.is-open { color: #1f8f4e; background: #e8f7ef; }
+    .plus-check-badge.is-closed { color: #606266; background: #f1f3f5; }
+    .plus-check-badge.is-other { color: #7c3aed; background: #f1eafe; }
+    .plus-check-badge.is-run { color: #377DFF; background: #edf4ff; }
+    .plus-check-badge.is-paused { color: #9a6700; background: #fff6db; }
+    .plus-check-badge.is-fail { color: #d94b4b; background: #fff0f0; }
+    .plus-check-badge.is-unknown { color: #909399; background: #f5f7fa; }
+    .plus-check-sub { margin-top: 4px; color: #909399; font-size: 11px; line-height: 1.45; word-break: break-word; }
+    .plus-quota-bar { width: 100%; height: 6px; margin-top: 6px; border-radius: 999px; background: #ebeef5; overflow: hidden; }
+    .plus-quota-bar > span { display: block; height: 100%; border-radius: inherit; background: #67c23a; }
+    .plus-quota-bar.is-warn > span { background: #e6a23c; }
+    .plus-quota-bar.is-danger > span { background: #f56c6c; }
+    .plus-link-login-card { grid-column: 1 / -1; }
+    .plus-link-login-layout { display: grid; grid-template-columns: minmax(340px, .7fr) minmax(620px, 1.55fr); }
+    .plus-link-login-input { border-right: 1px solid #ebeef5; }
+    .plus-link-login-input textarea { min-height: 190px; }
+    .plus-link-login-table-wrap { max-height: 360px; }
+    .plus-link-login-table .pll-email { width: 24%; word-break: break-all; }
+    .plus-link-login-table .pll-stage { width: 18%; }
+    .plus-link-login-table .pll-network { width: 18%; }
+    .plus-link-login-table .pll-result { width: 25%; }
+    .plus-link-login-table .pll-time { width: 15%; }
+    @media (max-width: 1100px) { .plus-check-grid { grid-template-columns: 1fr; } .plus-check-table-wrap { max-height: none; } }
+    @media (max-width: 1100px) { .plus-link-login-layout { grid-template-columns: 1fr; } .plus-link-login-input { border-right: 0; border-bottom: 1px solid #ebeef5; } }
+
+    /* ---- 独立验证码查看 ---- */
+    .otp-viewer-grid { display: grid; grid-template-columns: minmax(340px, .82fr) minmax(520px, 1.5fr); gap: 16px; }
+    .otp-viewer-import textarea { min-height: 250px; }
+    .otp-viewer-table .ov-email { width: 27%; word-break: break-all; }
+    .otp-viewer-table .ov-code { width: 16%; }
+    .otp-viewer-table .ov-source { width: 25%; word-break: break-all; }
+    .otp-viewer-table .ov-time { width: 18%; }
+    .otp-viewer-table .ov-op { width: 120px; text-align: right; }
+    .otp-viewer-table .ov-op button + button { margin-left: 6px; }
+    .otp-code-value { display: inline-block; color: #1f8f4e; font: 700 20px/1.2 Consolas, Monaco, monospace; letter-spacing: 2px; }
+    .otp-viewer-empty { text-align: center; color: #909399; padding: 30px !important; }
+    @media (max-width: 1100px) { .otp-viewer-grid { grid-template-columns: 1fr; } }
+
+    /* ---- 邮件查看 ---- */
+    .mail-viewer-layout { display: grid; grid-template-columns: minmax(330px, .72fr) minmax(560px, 1.6fr); gap: 16px; }
+    .mail-viewer-input textarea { min-height: 240px; }
+    .mail-viewer-list { padding: 14px; display: grid; gap: 14px; max-height: calc(100vh - 235px); overflow: auto; }
+    .mailbox-result { border: 1px solid #e4e7ed; border-radius: 9px; overflow: hidden; background: #fff; }
+    .mailbox-result-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 13px 15px; background: #f7f9fc; border-bottom: 1px solid #ebeef5; }
+    .mailbox-result-head strong { word-break: break-all; }
+    .mailbox-result-meta { margin-top: 4px; color: #909399; font-size: 11px; word-break: break-all; }
+    .mail-message-list { display: grid; gap: 10px; padding: 12px; }
+    .mail-message { border: 1px solid #ebeef5; border-radius: 8px; background: #fff; overflow: hidden; }
+    .mail-message.has-plus { border-color: #8fd2aa; box-shadow: 0 0 0 2px rgba(31,143,78,.08); }
+    .mail-message summary { cursor: pointer; list-style: none; padding: 12px 14px; }
+    .mail-message summary::-webkit-details-marker { display: none; }
+    .mail-message-subject { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 600; color: #303133; }
+    .mail-message-info { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 14px; color: #909399; font-size: 11px; }
+    .mail-message-body { border-top: 1px solid #ebeef5; padding: 12px 14px 14px; background: #fcfcfd; }
+    .mail-message-body pre { margin: 0; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #303133; font: 12px/1.65 Consolas, Monaco, monospace; }
+    .mail-message-body mark, .mail-message-subject mark { color: #146c3a; background: #dff5e8; border-radius: 3px; padding: 0 2px; }
+    .mail-plus-badge { display: inline-flex; flex: none; padding: 2px 8px; border-radius: 999px; color: #1f8f4e; background: #e8f7ef; font-size: 11px; font-weight: 700; }
+    .mail-viewer-filter { display: inline-flex; align-items: center; gap: 6px; color: #606266; font-size: 12px; }
+    @media (max-width: 1100px) { .mail-viewer-layout { grid-template-columns: 1fr; } .mail-viewer-list { max-height: none; } }
+
   </style>
 </head>
 <body>
@@ -1834,11 +1974,35 @@
       </svg>
       <span class="sidebar-item-label">注册</span>
     </button>
+    <button type="button" data-tab="mail-link-register" class="sidebar-item">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 5h18v14H3z"/><path d="M3 7l9 6 9-6"/><path d="M16 15h5M18.5 12.5v5"/>
+      </svg>
+      <span class="sidebar-item-label">邮箱链接注册</span>
+    </button>
     <button type="button" data-tab="accounts" class="sidebar-item">
       <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
       <span class="sidebar-item-label">账号</span>
+    </button>
+    <button type="button" data-tab="plus-check" class="sidebar-item">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/><path d="M11 8v6M8 11h6"/>
+      </svg>
+      <span class="sidebar-item-label">PLUS 查询</span>
+    </button>
+    <button type="button" data-tab="otp-viewer" class="sidebar-item">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 4h16v16H4z"/><path d="M4 8l8 5 8-5"/><path d="M9 17h6"/>
+      </svg>
+      <span class="sidebar-item-label">验证码查看</span>
+    </button>
+    <button type="button" data-tab="mail-viewer" class="sidebar-item">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 4h16v16H4z"/><path d="M4 8l8 5 8-5"/><path d="M8 17h8"/>
+      </svg>
+      <span class="sidebar-item-label">邮件查看</span>
     </button>
     <button type="button" data-tab="codex" class="sidebar-item">
       <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1860,17 +2024,11 @@
     </button>
   </nav>
   <div class="sidebar-footer">
-    <a href="https://t.me/+gu_cvEKq_vcyZWRl" target="_blank" rel="noopener noreferrer">
-      <svg class="sidebar-footer-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/>
-      </svg>
-      <span>TG 交流群</span>
+    <a href="/plus-handoff" title="打开独立 Plus 结账助手">
+      <span>Plus 结账助手</span>
     </a>
-    <a href="https://github.com/myfanhua/turb-gpt-free-register" target="_blank" rel="noopener noreferrer">
-      <svg class="sidebar-footer-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
-      </svg>
-      <span>Github 仓库</span>
+    <a href="tencent://message/?uin=924431704&amp;Site=&amp;Menu=yes" title="通过 QQ 联系 924431704">
+      <span>破甲提示词联系 QQ 924431704</span>
     </a>
     <a href="/?ui=legacy" title="切换到历史版顶部导航 UI">
       <svg class="sidebar-footer-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1960,16 +2118,14 @@
             </button>
           </span>
         </label>
-        <label class="jobs-tb-field">并发线程数
-          <span class="el-input-number">
-            <input id="regWorkersV2" type="number" min="1" max="16" value="3" inputmode="numeric">
-            <button type="button" class="el-input-number__increase" data-step-for="regWorkersV2" data-step="1" aria-label="增加">
-              <svg viewBox="0 0 24 24"><polyline points="6 14 12 8 18 14"/></svg>
-            </button>
-            <button type="button" class="el-input-number__decrease" data-step-for="regWorkersV2" data-step="-1" aria-label="减少">
-              <svg viewBox="0 0 24 24"><polyline points="6 10 12 16 18 10"/></svg>
-            </button>
-          </span>
+        <input id="regWorkersV2" type="hidden" value="3">
+        <label class="jobs-tb-field email-mode-tb" title="切换注册所用的邮箱来源，保存后立即生效">
+          邮箱模式
+          <div class="config-ep-select" id="emailModeSelectV2">
+            <button type="button" class="config-ep-select-btn" data-ep-toggle="emailModeSelectV2">加载中…</button>
+            <div class="config-ep-select-menu" role="listbox"></div>
+            <input type="hidden" data-key="EMAIL_SOURCE" value="">
+          </div>
         </label>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnStartV2">开始注册</button>
       </div>
@@ -1997,6 +2153,38 @@
       </div>
       <div class="jobs-v2-pager" id="pager-jobs-v2"></div>
     </section>
+  </div>
+
+  <!-- ============ 邮箱链接注册 ============ -->
+  <div id="tab-mail-link-register" class="hidden">
+    <h1 class="register-title">邮箱链接注册</h1>
+    <div class="mail-link-register-page">
+      <section class="mail-link-register" aria-labelledby="mailLinkRegisterTitle">
+        <div class="mail-link-register__head">
+          <div>
+            <div class="mail-link-register__title" id="mailLinkRegisterTitle">导入邮箱与邮箱查看链接</div>
+            <div class="mail-link-register__desc">每行自动识别一个邮箱和对应链接，并为该邮箱创建独立的正式注册任务。</div>
+          </div>
+        </div>
+        <textarea id="mailLinkRegisterText" spellcheck="false" placeholder="支持两种格式，每行一条：&#10;&#10;user@icloud.com----https://example.com/mail/user@icloud.com&#10;https://icloud-api.top/show/.../user@icloud.com" aria-label="邮箱与邮箱查看链接"></textarea>
+        <div class="mail-link-register-controls">
+          <label class="mail-link-register-field">并发线程数
+            <input id="mailLinkRegisterWorkers" type="number" min="1" max="16" value="3" inputmode="numeric">
+          </label>
+          <button type="button" class="jobs-tb-btn" id="btnMailLinkRegister">导入链接并注册</button>
+          <button type="button" class="jobs-tb-btn mail-link-register-secondary" id="btnMailLinkRegisterViewJobs">查看注册任务</button>
+        </div>
+        <div class="mail-link-register__actions">
+          <span class="mail-link-register__hint">触发验证码后自动轮询对应链接；失败重试仍绑定同一邮箱，并读取最新导入的链接。</span>
+        </div>
+        <div class="mail-link-register-message" id="mailLinkRegisterMessage"></div>
+      </section>
+      <div class="mail-link-register-notes" aria-label="处理说明">
+        <div class="mail-link-register-note"><strong>自动识别</strong><span>支持“邮箱----链接”“邮箱----密码----链接”，以及链接末尾包含邮箱的纯链接格式。</span></div>
+        <div class="mail-link-register-note"><strong>固定绑定</strong><span>不会被 Outlook 或其他邮箱池抢占，每条任务只使用对应邮箱。</span></div>
+        <div class="mail-link-register-note"><strong>自动取码</strong><span>发送验证码后轮询邮箱链接，取到新验证码后继续完成注册。</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- ============ 账号 ============ -->
@@ -2029,9 +2217,13 @@
       </div>
       <div class="jobs-toolbar-v2" id="accountsToolbarV2">
         <div class="acc-v2-btn-group">
-          <span class="acc-v2-btn-group-title">套餐/提链</span>
+          <span class="acc-v2-btn-group-title">套餐</span>
+          <button type="button" class="jobs-tb-btn" id="btnCheckSelectedValidityV2" disabled title="只检测选中账号的 access_token 是否仍有效，不查询套餐">检测账号存活</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnCheckSelectedPlansV2" disabled title="查询选中账号当前套餐；free 账号会检查 Plus 试用资格">查套餐</button>
-          <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnExtractSelectedLinksV2" disabled title="给选中的 free(可Plus试用) 账号批量提链，类型按配置 PIX/UPI/KAKAO_PAY/IDEAL">提链</button>
+        </div>
+        <div class="acc-v2-btn-group">
+          <span class="acc-v2-btn-group-title">PayPal</span>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnExtractSelectedLinksV2" disabled title="使用本地 link-pp 为选中的 free(可Plus试用) 账号批量生成 PayPal BA 链">批量提链</button>
         </div>
         <div class="acc-v2-btn-group">
           <span class="acc-v2-btn-group-title">Agent</span>
@@ -2092,6 +2284,157 @@
         <button class="btn" id="btnCloseRetryLog" style="float:right;min-height:28px;">关闭</button>
       </h3>
       <div class="log" id="retryLogContent">加载中…</div>
+    </div>
+  </div>
+
+  <!-- ============ 独立 PLUS 查询 ============ -->
+  <div id="tab-plus-check" class="hidden">
+    <h1 class="register-title">PLUS 查询</h1>
+    <div class="plus-check-grid">
+      <section class="plus-check-card" aria-label="导入账号查询 PLUS">
+        <div class="plus-check-card-head">
+          <h2>导入账号并立即查询</h2>
+          <p>自动识别纯 Token、邮箱+Token、Sub2 JSON/JSONL，以及 ZIP 压缩包。ZIP 内若同时有 JSON 和四字段 TXT，会优先读取有效的 Sub2 JSON。</p>
+        </div>
+        <div class="plus-check-import">
+          <textarea id="plusCheckImportText" spellcheck="false" placeholder="支持混合格式，例如：&#10;&#10;eyJ...&#10;user@example.com----eyJ...&#10;user@example.com|eyJ...&#10;{&quot;email&quot;:&quot;user@example.com&quot;,&quot;access_token&quot;:&quot;eyJ...&quot;}&#10;&#10;也可直接粘贴本项目导出的完整账号整行"></textarea>
+          <div class="plus-check-actions">
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnPlusCheckImport">导入并查询</button>
+            <button type="button" class="jobs-tb-btn" id="btnPlusCheckChooseFiles">选择文件 / ZIP</button>
+            <input id="plusCheckFiles" type="file" accept=".zip,.txt,.json,.jsonl,.csv,.log,application/zip,application/x-zip-compressed,application/json,text/plain,text/csv" multiple hidden>
+            <button type="button" class="jobs-tb-btn" id="btnPlusCheckClearText">清空输入</button>
+            <button type="button" class="jobs-tb-btn" id="btnPlusCheckRefresh">刷新结果</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnPlusCheckQuota">查询额度</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnPlusCheckExport" title="仅导出实时查询确认已开通 PLUS 的账号，每行：邮箱----access_token">导出 PLUS</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnPlusCheckConvertCpa" title="只导出经过 Codex OAuth 客户端校验、包含完整刷新凭证的 CPA JSON，不再伪造 Access Token-only 文件">导出可用 CPA</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnPlusCheckClearPool">清空查询池</button>
+          </div>
+          <div class="plus-check-result" id="plusCheckImportResult">Token 仅保存在本机现有账号数据中，列表接口不会返回完整 Token。</div>
+        </div>
+      </section>
+
+      <section class="plus-check-card" aria-label="PLUS 查询结果">
+        <div class="plus-check-card-head">
+          <h2>查询结果</h2>
+          <p>“未开通”表示当前账号套餐不是 PLUS；Free 账号如有试用资格会额外标注。</p>
+        </div>
+        <div class="plus-check-table-toolbar">
+          <input id="qPlusCheck" type="search" placeholder="搜索邮箱、套餐、状态…" autocomplete="off">
+          <span class="plus-check-summary" id="plusCheckSummary">共 0 个</span>
+        </div>
+        <div class="plus-check-table-wrap">
+          <table class="plus-check-table">
+            <thead><tr><th class="pc-email">账号</th><th class="pc-plan">套餐</th><th class="pc-result">PLUS 状态</th><th class="pc-quota">额度</th><th class="pc-time">查询时间</th><th class="pc-op">操作</th></tr></thead>
+            <tbody id="plusCheckBody"><tr><td colspan="6" style="text-align:center;color:#909399;padding:30px;">暂无导入账号</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="plus-check-card plus-link-login-card" aria-label="通过邮箱链接协议登录查询 PLUS">
+        <div class="plus-check-card-head">
+          <h2>邮箱链接协议登录查询</h2>
+          <p>自动从邮箱查看链接获取最新验证码，纯协议登录已有 ChatGPT 账号并查询 PLUS，不启动浏览器。支持暂停整个队列；运行任务会在当前网络请求结束后安全停住。优先使用配置代理/IP，预检失败会自动切换本机直连；遇到新账号资料创建页会停止，不会自动注册。</p>
+        </div>
+        <div class="plus-link-login-layout">
+          <div class="plus-check-import plus-link-login-input">
+            <textarea id="plusLinkLoginInput" spellcheck="false" placeholder="每行一个，支持两种格式：&#10;&#10;user@icloud.com----https://example.com/messages/.../user@icloud.com&#10;https://icloud-api.top/show/.../user@icloud.com"></textarea>
+            <div class="plus-check-actions">
+              <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnPlusLinkLoginStart">协议登录并查询</button>
+              <button type="button" class="jobs-tb-btn" id="btnPlusLinkLoginPause">暂停任务</button>
+              <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnPlusLinkLoginResume" disabled>继续任务</button>
+              <button type="button" class="jobs-tb-btn" id="btnPlusLinkLoginClearInput">清空输入</button>
+              <button type="button" class="jobs-tb-btn" id="btnPlusLinkLoginRefresh">刷新任务</button>
+              <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnPlusLinkLoginClearJobs">清理已完成任务</button>
+            </div>
+            <div class="plus-check-result" id="plusLinkLoginMessage">邮箱私密链接、验证码、Token 和代理凭据不会显示在任务列表中。</div>
+          </div>
+          <div>
+            <div class="plus-check-table-toolbar">
+              <span class="plus-check-summary" id="plusLinkLoginSummary">共 0 个任务</span>
+            </div>
+            <div class="plus-check-table-wrap plus-link-login-table-wrap">
+              <table class="plus-check-table plus-link-login-table">
+                <thead><tr><th class="pll-email">邮箱</th><th class="pll-stage">阶段</th><th class="pll-network">网络</th><th class="pll-result">状态与结果</th><th class="pll-time">更新时间</th></tr></thead>
+                <tbody id="plusLinkLoginBody"><tr><td colspan="5" style="text-align:center;color:#909399;padding:30px;">暂无协议登录任务</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ 独立验证码查看 ============ -->
+  <div id="tab-otp-viewer" class="hidden">
+    <h1 class="register-title">验证码查看</h1>
+    <div class="otp-viewer-grid">
+      <section class="plus-check-card" aria-label="导入邮箱取码链接">
+        <div class="plus-check-card-head">
+          <h2>粘贴邮箱和取码链接</h2>
+            <p>支持每行“邮箱----链接”“邮箱----密码----链接”或对应的 ==== 分隔格式，可混合粘贴或从文本文件导入。这里只读取最新验证码，不会写入注册邮箱池。</p>
+        </div>
+        <div class="plus-check-import otp-viewer-import">
+          <textarea id="otpViewerInput" spellcheck="false" placeholder="例如：&#10;geyser-dens-4g@icloud.com----http://yangyang.website/messages/.../geyser-dens-4g@icloud.com&#10;&#10;也支持：&#10;user@example.com====https://example.com/messages/user@example.com"></textarea>
+          <div class="plus-check-actions">
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnOtpViewerFetch">获取最新验证码</button>
+            <button type="button" class="jobs-tb-btn" id="btnOtpViewerChooseFile">选择文件</button>
+            <input id="otpViewerFile" type="file" accept=".txt,.csv,.log,text/plain,text/csv" multiple hidden>
+            <button type="button" class="jobs-tb-btn" id="btnOtpViewerClearInput">清空输入</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnOtpViewerClearResults">清空结果</button>
+          </div>
+          <div class="plus-check-result" id="otpViewerMessage">取码链接只用于本次请求，页面结果不会显示完整链接。</div>
+        </div>
+      </section>
+
+      <section class="plus-check-card" aria-label="最新验证码结果">
+        <div class="plus-check-card-head">
+          <h2>最新验证码</h2>
+          <p>点击“复制”即可用于登录；如果邮件刚到，可点击单条“刷新”。</p>
+        </div>
+        <div class="plus-check-table-toolbar">
+          <span class="plus-check-summary" id="otpViewerSummary">共 0 个</span>
+        </div>
+        <div class="plus-check-table-wrap">
+          <table class="plus-check-table otp-viewer-table">
+            <thead><tr><th class="ov-email">邮箱</th><th class="ov-code">验证码</th><th class="ov-source">取码地址</th><th class="ov-time">获取时间</th><th class="ov-op">操作</th></tr></thead>
+            <tbody id="otpViewerBody"><tr><td colspan="5" class="otp-viewer-empty">暂无查询结果</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ 邮件查看 ============ -->
+  <div id="tab-mail-viewer" class="hidden">
+    <h1 class="register-title">邮件查看</h1>
+    <div class="mail-viewer-layout">
+      <section class="plus-check-card" aria-label="邮箱链接输入">
+        <div class="plus-check-card-head">
+          <h2>粘贴邮箱查看链接</h2>
+          <p>支持直接粘贴 iCloud API 等邮箱展示链接，每行一个；自动读取全部可见邮件，并检查主题、发件人与正文是否包含 PLUS。</p>
+        </div>
+        <div class="plus-check-import mail-viewer-input">
+          <textarea id="mailViewerInput" spellcheck="false" placeholder="每行一个邮箱链接，例如：&#10;https://icloud-api.top/show/.../user@icloud.com"></textarea>
+          <div class="plus-check-actions">
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnMailViewerFetch">查看全部邮件</button>
+            <button type="button" class="jobs-tb-btn" id="btnMailViewerClearInput">清空输入</button>
+            <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnMailViewerClearResults">清空结果</button>
+          </div>
+          <div class="plus-check-result" id="mailViewerMessage">完整私密链接不会显示在查询结果中。</div>
+        </div>
+      </section>
+
+      <section class="plus-check-card" aria-label="全部邮件结果">
+        <div class="plus-check-card-head">
+          <h2>全部邮件</h2>
+          <p>包含 PLUS 的邮件会绿色高亮；点击邮件标题展开完整正文。</p>
+        </div>
+        <div class="plus-check-table-toolbar">
+          <span class="plus-check-summary" id="mailViewerSummary">邮箱 0 个 · 邮件 0 封 · PLUS 0 封</span>
+          <label class="mail-viewer-filter"><input type="checkbox" id="mailViewerPlusOnly"> 只看含 PLUS</label>
+        </div>
+        <div class="mail-viewer-list" id="mailViewerResults"><div class="otp-viewer-empty">暂无邮件结果</div></div>
+      </section>
     </div>
   </div>
 
@@ -2267,7 +2610,7 @@
     <div class="outlook-import-head">
       <div class="outlook-import-head-main">
         <h3 id="outlookImportTitle">导入邮箱素材</h3>
-        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取码地址（---- 或 ==== 均可）。默认按「已注册成功账号」导入，方便在账号页补跑 Codex。</p>
+        <p>Outlook：邮箱----密码----clientId----refreshToken；通用 API：邮箱----取码地址或邮箱----密码----取码地址（---- 或 ==== 均可）。默认按「已注册成功账号」导入，方便在账号页补跑 Codex。</p>
       </div>
       <button type="button" class="outlook-import-close" id="btnCloseOutlookImport" aria-label="关闭">×</button>
     </div>
@@ -2291,7 +2634,7 @@
       </label>
       <label class="outlook-import-field">
         <span>邮箱素材</span>
-        <textarea id="importTextV2" placeholder="Outlook: email----password----clientId----refreshToken&#10;通用API: email----取码地址"></textarea>
+        <textarea id="importTextV2" placeholder="Outlook: email----password----clientId----refreshToken&#10;通用API: email----取码地址 或 email----password----取码地址"></textarea>
       </label>
     </div>
     <div class="outlook-import-foot">
@@ -2315,7 +2658,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 let copySeq = 0;
 const copyStore = new Map();
-let ACCOUNTS = [], OUTLOOK = [], CONFIG = [];
+let ACCOUNTS = [], OUTLOOK = [], CONFIG = [], PLUS_CHECK_ACCOUNTS = [], PLUS_LINK_LOGIN_JOBS = [], OTP_VIEWER_RESULTS = [], MAIL_VIEWER_RESULTS = [];
 let ACCOUNTS_TOTAL = 0;
 let OUTLOOK_TOTAL = 0;
 let SHOW_ARCHIVED_ACCOUNTS = false;
@@ -2493,18 +2836,40 @@ function jobsV2OpIcons() {
     view: `<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
     retry: `<svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
     stop: `<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
-    check: `<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>`,
     del: `<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
   };
 }
 function showToast(t) { const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(showToast.t); showToast.t=setTimeout(()=>el.classList.remove('show'),1400); }
-async function copyText(text) {
-  if (!text) return;
+async function copyText(text, options = {}) {
+  const value = String(text == null ? '' : text);
+  if (!value) return false;
+  let copied = false;
   try {
-    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
-    else { const a=document.createElement('textarea'); a.value=text; a.style.position='fixed'; a.style.opacity='0'; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); }
-    showToast('已复制');
-  } catch(e) { showToast('复制失败'); }
+    // localhost/127.0.0.1 may expose Clipboard API even when the page is not secure.
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(value);
+      copied = true;
+    }
+  } catch (_) {
+    copied = false;
+  }
+  if (!copied) {
+    const area = document.createElement('textarea');
+    area.value = value;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '0';
+    area.style.left = '-9999px';
+    area.style.opacity = '0.01';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+    try { copied = document.execCommand('copy') === true; } catch (_) { copied = false; }
+    area.remove();
+  }
+  if (options.notify !== false) showToast(copied ? '已复制' : '复制失败：请检查浏览器剪贴板权限');
+  return copied;
 }
 async function api(url, opts) {
   const r = await fetch(url, opts);
@@ -2519,12 +2884,13 @@ function debounce(fn, wait=250) {
 
 // ---------- Tab 切换 ----------
 function activateTab(tab, persist=true) {
-  const allowed = ['register','accounts','codex','outlook','config'];
+  const allowed = ['register','mail-link-register','accounts','plus-check','otp-viewer','mail-viewer','codex','outlook','config'];
   if (!allowed.includes(tab)) tab = 'register';
   $$('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
   allowed.forEach(t => $('#tab-'+t).classList.toggle('hidden', t !== tab));
   if (persist) localStorage.setItem('gpt_console_active_tab', tab);
   if (tab === 'accounts') loadAccounts();
+  if (tab === 'plus-check') { loadPlusCheckAccounts(); loadPlusLinkLoginJobs(); }
   if (tab === 'codex') loadCodex();
   if (tab === 'outlook') loadOutlook();
   if (tab === 'config') loadConfig();
@@ -2544,10 +2910,631 @@ async function loadSummary() {
   } catch(e) {}
 }
 
+// ---------- 独立 PLUS 查询 ----------
+let plusCheckLoading = false;
+function plusCheckStatusHtml(row) {
+  const status = row.plus_status || 'unknown';
+  if (status === 'checking') {
+    const text = row.plan_check_status === 'queued' ? '排队查询中' : '正在查询';
+    return `<span class="plus-check-badge is-run">${text}</span>`;
+  }
+  if (status === 'opened') return '<span class="plus-check-badge is-open">已开通 PLUS</span>';
+  if (status === 'other_paid') return '<span class="plus-check-badge is-other">已开通其他付费套餐</span>';
+  if (status === 'not_opened') {
+    let eligibility = '';
+    if (row.plus_trial_eligible) {
+      eligibility = '<div class="plus-check-sub">可开通 PLUS 一月免费试用</div>';
+    } else if (row.plus_trial_coupon_error) {
+      eligibility = `<div class="plus-check-sub" title="${esc(row.plus_trial_coupon_error)}">试用资格接口查询失败</div>`;
+    } else if (row.plus_yearly_new_user_eligible) {
+      eligibility = '<div class="plus-check-sub">可购买 PLUS 年付新用户套餐（非免费试用）</div>';
+    } else if (row.plus_trial_coupon_state === 'not_eligible') {
+      eligibility = '<div class="plus-check-sub">一月免费试用：无资格</div>';
+    }
+    return `<span class="plus-check-badge is-closed">未开通 PLUS</span>${eligibility}`;
+  }
+  if (status === 'failed') {
+    const err = row.plan_check_error || '查询失败';
+    return `<span class="plus-check-badge is-fail">查询失败</span><div class="plus-check-sub" title="${esc(err)}">${esc(short(err, 90))}</div>`;
+  }
+  return '<span class="plus-check-badge is-unknown">等待查询</span>';
+}
+async function openSavedAccountBrowser(id, button=null, allowRotatedExit=false, openBilling=false) {
+  const originalText = button ? button.textContent : '';
+  if (button) { button.disabled = true; button.textContent = '启动中'; }
+  try {
+    const action = openBilling ? 'open-billing' : 'open-browser';
+    await api(`/api/accounts/${encodeURIComponent(id)}/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({allow_rotated_exit: !!allowRotatedExit}),
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const status = await api(`/api/accounts/${encodeURIComponent(id)}/open-browser`);
+      if (status.status === 'ready') {
+        const extra = status.warning ? `；${status.warning}` : '';
+        showToast(`${status.message || '浏览器已打开'}${extra}`);
+        if (button) button.textContent = '已打开';
+        return;
+      }
+      if (status.status === 'failed') {
+        if (status.error_code === 'exit_ip_changed' && !allowRotatedExit) {
+          const registered = status.registered_exit_ip || '未知';
+          const current = status.current_exit_ip || '未知';
+          const proceed = confirm(`注册时出口 IP：${registered}\n当前出口 IP：${current}\n\nThorData 原代理入口的实际出口已经轮换，无法保证原 IP。是否仍使用原注册代理入口打开？`);
+          if (proceed) return await openSavedAccountBrowser(id, button, true, openBilling);
+        }
+        throw new Error(status.error || status.message || '浏览器打开失败');
+      }
+      if (status.status === 'closed') throw new Error('浏览器启动后已关闭');
+    }
+    throw new Error('浏览器启动超时');
+  } catch (error) {
+    showToast((openBilling ? '打开 Plus 页面失败：' : '打开浏览器失败：') + error.message);
+  } finally {
+    if (button && button.textContent !== '已打开') {
+      button.disabled = false;
+      button.textContent = originalText || '打开浏览器';
+    } else if (button) {
+      setTimeout(() => { button.disabled = false; button.textContent = originalText || '打开浏览器'; }, 2500);
+    }
+  }
+}
+function openOfficialBilling(id, button=null, allowRotatedExit=false) {
+  return openSavedAccountBrowser(id, button, allowRotatedExit, true);
+}
+function plusQuotaHtml(row) {
+  if (row.plan_check_status === 'failed') {
+    return '<span class="plus-check-badge is-fail">Token未验证</span><div class="plus-check-sub">请先重新查询套餐</div>';
+  }
+  const status = row.quota_check_status || '';
+  if (['queued','running'].includes(status)) return '<span class="plus-check-badge is-run">额度查询中</span>';
+  if (status === 'failed') {
+    const err = row.quota_check_error || '额度查询失败';
+    return `<span class="plus-check-badge is-fail">查询失败</span><div class="plus-check-sub" title="${esc(err)}">${esc(short(err, 70))}</div><button type="button" class="jobs-tb-btn" data-plus-quota="${esc(row.id)}">重查额度</button>`;
+  }
+  if (status === 'success') {
+    const used = Number(row.primary_used_percent || 0);
+    const remaining = row.primary_remaining_percent == null ? Math.max(0, 100-used) : Number(row.primary_remaining_percent);
+    const barCls = used >= 90 ? 'is-danger' : (used >= 70 ? 'is-warn' : '');
+    const reset = row.primary_reset_at_iso ? formatDateTime(row.primary_reset_at_iso) : '-';
+    const windowSec = Number(row.primary_limit_window_seconds || 0);
+    const windowLabel = windowSec >= 604800 ? `${Math.round(windowSec/86400)}天窗口` : (windowSec >= 3600 ? `${Math.round(windowSec/3600)}小时窗口` : '主窗口');
+    const credits = row.credits_unlimited ? 'Credits 无限' : (row.credits_has_credits ? `Credits ${row.credits_balance ?? '-'}` : '无额外 Credits');
+    return `<div><strong>剩余 ${esc(Number.isInteger(remaining)?remaining:remaining.toFixed(1))}%</strong> · 已用 ${esc(Number.isInteger(used)?used:used.toFixed(1))}%</div><div class="plus-quota-bar ${barCls}"><span style="width:${Math.max(0,Math.min(100,used))}%"></span></div><div class="plus-check-sub">${esc(windowLabel)} · 重置 ${esc(reset)} · ${esc(credits)}</div><button type="button" class="jobs-tb-btn" data-plus-quota="${esc(row.id)}">刷新额度</button>`;
+  }
+  return `<button type="button" class="jobs-tb-btn jobs-tb-btn--primary" data-plus-quota="${esc(row.id)}">查询额度</button>`;
+}
+function renderPlusCheckAccounts() {
+  const rows = PLUS_CHECK_ACCOUNTS || [];
+  const counts = rows.reduce((out, row) => { const key=row.plus_status||'unknown'; out[key]=(out[key]||0)+1; return out; }, {});
+  const summary = [`共 ${rows.length} 个`, `PLUS ${counts.opened||0}`, `未开通 ${counts.not_opened||0}`];
+  if (counts.checking) summary.push(`查询中 ${counts.checking}`);
+  if (counts.failed) summary.push(`失败 ${counts.failed}`);
+  $('#plusCheckSummary').textContent = summary.join(' · ');
+  $('#plusCheckBody').innerHTML = rows.map(row => {
+    const email = row.plus_check_synthetic_email ? '未识别邮箱' : (row.email || '-');
+    const emailSub = row.plus_check_synthetic_email ? `<div class="plus-check-sub">${esc(row.email)}</div>` : `<div class="plus-check-sub">${esc(row.plus_check_import_format || 'auto')} · #${esc(row.id)}</div>`;
+    const plan = row.current_plan_type || row.plan_type || '-';
+    const running = ['queued','running'].includes(row.plan_check_status);
+    return `<tr>
+      <td class="pc-email"><div>${esc(email)}</div>${emailSub}</td>
+      <td class="pc-plan"><strong>${esc(plan)}</strong>${row.billing_period ? `<div class="plus-check-sub">${esc(row.billing_period)}${row.billing_currency ? ' · '+esc(row.billing_currency) : ''}</div>` : ''}</td>
+      <td class="pc-result">${plusCheckStatusHtml(row)}</td>
+      <td class="pc-quota">${plusQuotaHtml(row)}</td>
+      <td class="pc-time">${esc(formatDateTime(row.plan_checked_at || row.plan_check_started_at || row.plan_check_queued_at || row.plus_check_imported_at))}</td>
+      <td class="pc-op"><button type="button" class="jobs-tb-btn jobs-tb-btn--primary" data-open-account-billing="${esc(row.id)}">Plus 结账</button><button type="button" class="jobs-tb-btn" data-open-account-browser="${esc(row.id)}">打开浏览器</button><button type="button" class="jobs-tb-btn" data-plus-check-recheck="${esc(row.id)}" ${running?'disabled':''}>${running?'查询中':'重查'}</button><button type="button" class="jobs-tb-btn" data-plus-check-remove="${esc(row.id)}">移除</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:#909399;padding:30px;">暂无导入账号</td></tr>';
+}
+async function loadPlusCheckAccounts() {
+  if (plusCheckLoading) return;
+  plusCheckLoading = true;
+  try {
+    const q = ($('#qPlusCheck')?.value || '').trim();
+    const result = await api(`/api/plus-check/accounts?limit=5000&q=${encodeURIComponent(q)}`);
+    PLUS_CHECK_ACCOUNTS = result.items || [];
+    renderPlusCheckAccounts();
+  } catch(e) {
+    showToast('加载 PLUS 查询结果失败: ' + e.message);
+  } finally {
+    plusCheckLoading = false;
+  }
+}
+async function importAndCheckPlus() {
+  const text = $('#plusCheckImportText').value.trim();
+  const button = $('#btnPlusCheckImport');
+  const resultBox = $('#plusCheckImportResult');
+  if (!text) { showToast('请先粘贴账号或 Token'); return; }
+  button.disabled = true;
+  resultBox.classList.remove('is-error');
+  resultBox.textContent = '正在自动识别格式并加入查询队列…';
+  try {
+    const result = await api('/api/plus-check/import', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})
+    });
+    resultBox.textContent = plusImportResultText(result);
+    await loadPlusCheckAccounts();
+  } catch(e) {
+    resultBox.classList.add('is-error');
+    resultBox.textContent = '导入失败：' + e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+function plusImportResultText(result, prefix='') {
+  const messages = [
+    `识别 ${result.parsed_count||0} 个`,
+    `新增 ${result.imported_count||0} 个`,
+    `更新 ${result.updated_count||0} 个`,
+    `已排队 ${result.started_count||0} 个`,
+  ];
+  if (result.busy_count) messages.push(`查询中 ${result.busy_count}`);
+  if (result.duplicates) messages.push(`重复 Token ${result.duplicates}`);
+  if (result.failed_count) messages.push(`失败 ${result.failed_count}`);
+  if ((result.parse_errors||[]).length) messages.push(`未识别行 ${(result.parse_errors||[]).length}`);
+  const details = [];
+  (result.parse_errors||[]).slice(0, 5).forEach(item => details.push(`第 ${item.line_no || '?'} 行：${item.reason}`));
+  (result.failed||[]).slice(0, 5).forEach(item => details.push(`${item.email || ('ID '+item.id) || '账号'}：${item.reason || item.error || '失败'}`));
+  return (prefix ? prefix + '\n' : '') + messages.join('；') + '。结果会自动刷新。' + (details.length ? `\n${details.join('\n')}` : '');
+}
+async function recheckPlusAccounts(ids) {
+  if (!ids.length) return;
+  try {
+    const result = await api('/api/plus-check/check', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({account_ids:ids})
+    });
+    showToast(`已排队 ${result.started_count||0} 个${result.busy_count ? `，${result.busy_count} 个正在查询` : ''}`);
+    await loadPlusCheckAccounts();
+  } catch(e) { showToast('重新查询失败: ' + e.message); }
+}
+async function clearPlusCheckPool(ids=null) {
+  const clearingAll = !ids;
+  const message = clearingAll
+    ? '确定清空整个 PLUS 查询池吗？\n\n只清空这里的查询列表，不会删除主账号库里的邮箱和 Token。'
+    : '确定从 PLUS 查询池移除这个账号吗？\n\n不会删除主账号库里的邮箱和 Token。';
+  if (!confirm(message)) return;
+  try {
+    const result = await api('/api/plus-check/clear', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(ids ? {account_ids:ids} : {})
+    });
+    showToast(`已从查询池移除 ${result.removed_count||0} 个账号`);
+    await loadPlusCheckAccounts();
+  } catch(e) { showToast('清理查询池失败: ' + e.message); }
+}
+async function exportPlusCheckAccounts() {
+  const button = $('#btnPlusCheckExport');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/plus-check/export?format=txt');
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'PLUS_accounts.txt';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = filename;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('PLUS 账号已导出');
+  } catch(e) { showToast('导出失败: ' + e.message); }
+  finally { button.disabled = false; }
+}
+async function queryPlusQuota(ids=null) {
+  const targetIds = ids || PLUS_CHECK_ACCOUNTS
+    .filter(row => row.plan_check_status === 'success' && row.plan_check_ok === true)
+    .map(row => Number(row.id)).filter(Number.isFinite);
+  if (!targetIds.length) { showToast('查询池中没有账号'); return; }
+  const button = $('#btnPlusCheckQuota');
+  if (!ids) button.disabled = true;
+  try {
+    const result = await api('/api/plus-check/quota', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({account_ids:targetIds})
+    });
+    showToast(`额度查询已排队 ${result.started_count||0} 个${result.busy_count ? `，${result.busy_count} 个正在查询` : ''}`);
+    await loadPlusCheckAccounts();
+  } catch(e) { showToast('查询额度失败: ' + e.message); }
+  finally { if (!ids) button.disabled = false; }
+}
+async function convertPlusToCpa() {
+  if (!confirm('确定导出查询池中已确认 PLUS 的可用 CPA 文件吗？\n\n只会导出正常 Codex OAuth 产生的完整 access_token、id_token、refresh_token。\nChatGPT 网页 Token、缺少刷新凭证或混合来源的账号会被拒绝，不会再生成无法使用的文件。')) return;
+  const button = $('#btnPlusCheckConvertCpa');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/plus-check/convert-cpa', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    const complete = Number(response.headers.get('X-CPA-Complete-Count') || 0);
+    const rejected = Number(response.headers.get('X-CPA-Rejected-Count') || 0);
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'PLUS_CPA_files.zip';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href=url; link.download=filename;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`可用 CPA 文件已导出 ${complete} 个${rejected ? `，拒绝无效凭证 ${rejected} 个` : ''}`);
+  } catch(e) { showToast('转换 CPA 文件失败: ' + e.message); }
+  finally { button.disabled = false; }
+}
+$('#btnPlusCheckImport').addEventListener('click', importAndCheckPlus);
+$('#btnPlusCheckChooseFiles').addEventListener('click', () => $('#plusCheckFiles').click());
+$('#plusCheckFiles').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  const zipFiles = files.filter(file => file.name.toLowerCase().endsWith('.zip'));
+  const textFiles = files.filter(file => !file.name.toLowerCase().endsWith('.zip'));
+  const resultBox = $('#plusCheckImportResult');
+  try {
+    if (textFiles.length) {
+      const chunks = await Promise.all(textFiles.map(file => file.text()));
+      const textarea = $('#plusCheckImportText');
+      textarea.value = [textarea.value.trim(), ...chunks.map(x => x.trim()).filter(Boolean)].filter(Boolean).join('\n');
+    }
+    if (zipFiles.length) {
+      resultBox.classList.remove('is-error');
+      resultBox.textContent = `正在读取 ${zipFiles.length} 个 ZIP 并导入查询…`;
+      const form = new FormData();
+      zipFiles.forEach(file => form.append('files', file, file.name));
+      const result = await api('/api/plus-check/import-archive', {method:'POST', body:form});
+      const processed = (result.archives||[]).reduce((sum, item) => sum + Number(item.processed_files||0), 0);
+      const ignored = (result.archives||[]).reduce((sum, item) => sum + Number(item.ignored_text_files||0), 0);
+      const prefix = `ZIP ${result.archive_count||zipFiles.length} 个：读取 Sub2 JSON ${processed} 个${ignored ? `，忽略配套四字段 TXT ${ignored} 个` : ''}。`;
+      resultBox.textContent = plusImportResultText(result, prefix);
+      await loadPlusCheckAccounts();
+    } else {
+      resultBox.textContent = `已读取 ${textFiles.length} 个文件，可继续混合粘贴或点击“导入并查询”。`;
+    }
+  } catch(err) {
+    resultBox.classList.add('is-error');
+    resultBox.textContent = 'ZIP 导入失败：' + err.message;
+  }
+  e.target.value = '';
+});
+$('#btnPlusCheckClearText').addEventListener('click', () => { $('#plusCheckImportText').value=''; $('#plusCheckImportText').focus(); });
+$('#btnPlusCheckRefresh').addEventListener('click', loadPlusCheckAccounts);
+$('#btnPlusCheckQuota').addEventListener('click', () => queryPlusQuota());
+$('#btnPlusCheckExport').addEventListener('click', exportPlusCheckAccounts);
+$('#btnPlusCheckConvertCpa').addEventListener('click', convertPlusToCpa);
+$('#btnPlusCheckClearPool').addEventListener('click', () => clearPlusCheckPool());
+$('#qPlusCheck').addEventListener('input', debounce(loadPlusCheckAccounts, 250));
+$('#plusCheckBody').addEventListener('click', (e) => {
+  const billingButton = e.target.closest('[data-open-account-billing]');
+  if (billingButton) { openOfficialBilling(Number(billingButton.dataset.openAccountBilling), billingButton); return; }
+  const browserButton = e.target.closest('[data-open-account-browser]');
+  if (browserButton) { openSavedAccountBrowser(Number(browserButton.dataset.openAccountBrowser), browserButton); return; }
+  const quotaButton = e.target.closest('[data-plus-quota]');
+  if (quotaButton) { queryPlusQuota([Number(quotaButton.dataset.plusQuota)]); return; }
+  const button = e.target.closest('[data-plus-check-recheck]');
+  if (button) { recheckPlusAccounts([Number(button.dataset.plusCheckRecheck)]); return; }
+  const removeButton = e.target.closest('[data-plus-check-remove]');
+  if (removeButton) clearPlusCheckPool([Number(removeButton.dataset.plusCheckRemove)]);
+});
+
+// ---------- 邮箱链接协议登录查询 ----------
+let plusLinkLoginLoading = false;
+let PLUS_LINK_LOGIN_PAUSED = false;
+const PLUS_LINK_LOGIN_STAGE_LABELS = {
+  queued: '等待执行',
+  starting: '网络预检',
+  sending_otp: '触发验证码',
+  waiting_otp: '等待验证码',
+  validating_otp: '验证验证码',
+  logging_in: '获取登录 Token',
+  querying_plan: '查询 PLUS',
+  completed: '已完成',
+  failed: '失败',
+};
+function plusLinkLoginNetworkText(row) {
+  if (row.network_mode === 'proxy') return '配置代理/IP';
+  if (row.network_mode === 'direct' && row.fallback_used) return '本机直连（自动切换）';
+  if (row.network_mode === 'direct') return '本机直连';
+  return '等待网络预检';
+}
+function plusLinkLoginResultHtml(row) {
+  if (row.status === 'success') {
+    const plan = row.plan_type || 'unknown';
+    if (row.plus_status === 'opened') return `<span class="plus-check-badge is-open">已开通 PLUS</span><div class="plus-check-sub">套餐 ${esc(plan)}</div>`;
+    if (row.plus_status === 'other_paid') return `<span class="plus-check-badge is-other">其他付费套餐</span><div class="plus-check-sub">套餐 ${esc(plan)}</div>`;
+    return `<span class="plus-check-badge is-closed">未开通 PLUS</span><div class="plus-check-sub">套餐 ${esc(plan)}</div>`;
+  }
+  if (row.status === 'failed') {
+    const error = row.error || row.message || '登录查询失败';
+    return `<span class="plus-check-badge is-fail">查询失败</span><div class="plus-check-sub" title="${esc(error)}">${esc(short(error, 110))}</div>`;
+  }
+  if (row.status === 'paused') return `<span class="plus-check-badge is-paused">已暂停</span><div class="plus-check-sub">${esc(row.message || '等待继续')}</div>`;
+  if (row.status === 'pausing') return `<span class="plus-check-badge is-paused">暂停中</span><div class="plus-check-sub">${esc(row.message || '等待当前网络请求结束')}</div>`;
+  if (row.status === 'running') return `<span class="plus-check-badge is-run">执行中</span><div class="plus-check-sub">${esc(row.message || '正在处理')}</div>`;
+  return `<span class="plus-check-badge is-unknown">${PLUS_LINK_LOGIN_PAUSED ? '队列已暂停' : '排队中'}</span>`;
+}
+function updatePlusLinkLoginPauseButtons() {
+  const pauseButton = $('#btnPlusLinkLoginPause');
+  const resumeButton = $('#btnPlusLinkLoginResume');
+  if (pauseButton) pauseButton.disabled = PLUS_LINK_LOGIN_PAUSED;
+  if (resumeButton) resumeButton.disabled = !PLUS_LINK_LOGIN_PAUSED;
+}
+function renderPlusLinkLoginJobs() {
+  const rows = PLUS_LINK_LOGIN_JOBS || [];
+  const success = rows.filter(row => row.status === 'success').length;
+  const failed = rows.filter(row => row.status === 'failed').length;
+  const running = rows.filter(row => ['queued','running','pausing','paused'].includes(row.status)).length;
+  const paused = rows.filter(row => ['pausing','paused'].includes(row.status)).length;
+  $('#plusLinkLoginSummary').textContent = `共 ${rows.length} 个任务 · 进行中 ${running} · 已暂停 ${paused} · 成功 ${success} · 失败 ${failed}`;
+  updatePlusLinkLoginPauseButtons();
+  $('#plusLinkLoginBody').innerHTML = rows.map(row => {
+    const stage = PLUS_LINK_LOGIN_STAGE_LABELS[row.stage] || row.stage || '等待执行';
+    return `<tr>
+      <td class="pll-email"><strong>${esc(row.email || '-')}</strong><div class="plus-check-sub">${esc(row.mail_url_masked || '私密链接已隐藏')}</div></td>
+      <td class="pll-stage"><strong>${esc(stage)}</strong><div class="plus-check-sub">${esc(row.message || '')}</div></td>
+      <td class="pll-network">${esc(plusLinkLoginNetworkText(row))}</td>
+      <td class="pll-result">${plusLinkLoginResultHtml(row)}</td>
+      <td class="pll-time">${esc(formatDateTime(row.updated_at || row.created_at))}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" style="text-align:center;color:#909399;padding:30px;">暂无协议登录任务</td></tr>';
+}
+async function loadPlusLinkLoginJobs() {
+  if (plusLinkLoginLoading) return;
+  plusLinkLoginLoading = true;
+  try {
+    const result = await api('/api/plus-check/login-by-mail-link/jobs');
+    PLUS_LINK_LOGIN_JOBS = result.items || [];
+    PLUS_LINK_LOGIN_PAUSED = !!result.paused;
+    renderPlusLinkLoginJobs();
+  } catch(e) {
+    showToast('加载协议登录任务失败: ' + e.message);
+  } finally {
+    plusLinkLoginLoading = false;
+  }
+}
+async function startPlusLinkLogin() {
+  const text = ($('#plusLinkLoginInput').value || '').trim();
+  const button = $('#btnPlusLinkLoginStart');
+  const message = $('#plusLinkLoginMessage');
+  if (!text) { showToast('请先粘贴邮箱和邮箱查看链接'); return; }
+  button.disabled = true;
+  message.classList.remove('is-error');
+  message.textContent = '正在识别邮箱链接并加入协议登录队列…';
+  try {
+    const result = await api('/api/plus-check/login-by-mail-link', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})
+    });
+    const errors = result.errors || [];
+    const details = errors.slice(0, 5).map(item => `第 ${item.line_no || '-'} 行：${item.reason || '无法识别'}`);
+    message.textContent = `已加入 ${result.accepted_count || 0} 个任务。优先使用配置代理/IP，网络不通会自动切换本机直连。${details.length ? `\n${details.join('\n')}` : ''}`;
+    await loadPlusLinkLoginJobs();
+  } catch(e) {
+    message.classList.add('is-error');
+    message.textContent = '提交失败：' + e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+async function clearPlusLinkLoginJobs() {
+  if (!confirm('确定清理已完成和失败的协议登录任务吗？\n\n正在排队或执行中的任务会保留。')) return;
+  try {
+    const result = await api('/api/plus-check/login-by-mail-link/clear', {method:'POST'});
+    showToast(`已清理 ${result.removed_count || 0} 个任务`);
+    await loadPlusLinkLoginJobs();
+  } catch(e) { showToast('清理任务失败: ' + e.message); }
+}
+async function pausePlusLinkLoginJobs() {
+  const message = $('#plusLinkLoginMessage');
+  try {
+    const result = await api('/api/plus-check/login-by-mail-link/pause', {method:'POST'});
+    PLUS_LINK_LOGIN_PAUSED = true;
+    updatePlusLinkLoginPauseButtons();
+    message.classList.remove('is-error');
+    message.textContent = `暂停请求已发送：${result.affected_running || 0} 个运行任务将在当前网络请求结束后停住，${result.queued || 0} 个排队任务不会继续推进。`;
+    await loadPlusLinkLoginJobs();
+  } catch(e) {
+    message.classList.add('is-error');
+    message.textContent = '暂停失败：' + e.message;
+  }
+}
+async function resumePlusLinkLoginJobs() {
+  const message = $('#plusLinkLoginMessage');
+  try {
+    const result = await api('/api/plus-check/login-by-mail-link/resume', {method:'POST'});
+    PLUS_LINK_LOGIN_PAUSED = false;
+    updatePlusLinkLoginPauseButtons();
+    message.classList.remove('is-error');
+    message.textContent = `任务已继续，恢复 ${result.resumed || 0} 个已暂停任务，排队任务将继续执行。`;
+    await loadPlusLinkLoginJobs();
+  } catch(e) {
+    message.classList.add('is-error');
+    message.textContent = '继续失败：' + e.message;
+  }
+}
+$('#btnPlusLinkLoginStart').addEventListener('click', startPlusLinkLogin);
+$('#btnPlusLinkLoginPause').addEventListener('click', pausePlusLinkLoginJobs);
+$('#btnPlusLinkLoginResume').addEventListener('click', resumePlusLinkLoginJobs);
+$('#btnPlusLinkLoginClearInput').addEventListener('click', () => { $('#plusLinkLoginInput').value=''; $('#plusLinkLoginInput').focus(); });
+$('#btnPlusLinkLoginRefresh').addEventListener('click', loadPlusLinkLoginJobs);
+$('#btnPlusLinkLoginClearJobs').addEventListener('click', clearPlusLinkLoginJobs);
+
+// ---------- 独立验证码查看 ----------
+function renderOtpViewerResults() {
+  const rows = OTP_VIEWER_RESULTS || [];
+  const success = rows.filter(row => row.ok).length;
+  $('#otpViewerSummary').textContent = `共 ${rows.length} 个 · 成功 ${success} · 失败 ${rows.length-success}`;
+  $('#otpViewerBody').innerHTML = rows.map((row, index) => {
+    const codeHtml = row.ok
+      ? `<span class="otp-code-value">${esc(row.code)}</span><div class="plus-check-sub">HTTP ${esc(row.http_status || 200)}</div>`
+      : `<span class="plus-check-badge is-fail">获取失败</span><div class="plus-check-sub">${esc(row.error || '未获取到验证码')}</div>`;
+    const copyButton = row.ok ? cbtn('复制', row.code, 'jobs-tb-btn jobs-tb-btn--good') : '';
+    return `<tr>
+      <td class="ov-email"><strong>${esc(row.email || '-')}</strong><div class="plus-check-sub">第 ${esc(row.line_no || '-')} 行</div></td>
+      <td class="ov-code">${codeHtml}</td>
+      <td class="ov-source">${esc(row.url || '已隐藏')}</td>
+      <td class="ov-time">${esc(formatDateTime(row.fetched_at))}</td>
+      <td class="ov-op">${copyButton}<button type="button" class="jobs-tb-btn" data-otp-refresh="${index}">刷新</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="otp-viewer-empty">暂无查询结果</td></tr>';
+}
+
+async function fetchOtpViewer(sourceText=null, replaceIndex=null) {
+  const input = $('#otpViewerInput');
+  const text = sourceText == null ? input.value.trim() : String(sourceText).trim();
+  const message = $('#otpViewerMessage');
+  const button = $('#btnOtpViewerFetch');
+  if (!text) { showToast('请先粘贴邮箱和取码链接'); return; }
+
+  if (replaceIndex == null) button.disabled = true;
+  message.classList.remove('is-error');
+  message.textContent = replaceIndex == null ? '正在获取最新验证码…' : '正在刷新该邮箱验证码…';
+  try {
+    const response = await api('/api/otp-viewer/fetch', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})
+    });
+    const sourceLines = text.split(/\r?\n/);
+    const items = (response.items || []).map(row => ({
+      ...row,
+      source_line: sourceLines[Math.max(0, Number(row.line_no || 1)-1)] || text,
+    }));
+    if (replaceIndex == null) OTP_VIEWER_RESULTS = items;
+    else if (items.length) OTP_VIEWER_RESULTS.splice(replaceIndex, 1, items[0]);
+    renderOtpViewerResults();
+
+    const details = (response.errors || []).slice(0, 5).map(err => `第 ${err.line_no || '?'} 行：${err.reason}`);
+    message.textContent = `已处理 ${response.count || 0} 个，成功 ${response.success_count || 0} 个，失败 ${response.failed_count || 0} 个。` + (details.length ? `\n${details.join('\n')}` : '');
+    if (response.failed_count) message.classList.add('is-error');
+  } catch(e) {
+    message.classList.add('is-error');
+    message.textContent = '获取失败：' + e.message;
+  } finally {
+    if (replaceIndex == null) button.disabled = false;
+  }
+}
+
+$('#btnOtpViewerFetch').addEventListener('click', () => fetchOtpViewer());
+$('#btnOtpViewerChooseFile').addEventListener('click', () => $('#otpViewerFile').click());
+$('#otpViewerFile').addEventListener('change', async (event) => {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  try {
+    const chunks = await Promise.all(files.map(file => file.text()));
+    const input = $('#otpViewerInput');
+    input.value = [input.value.trim(), ...chunks.map(value => value.trim()).filter(Boolean)].filter(Boolean).join('\n');
+    $('#otpViewerMessage').textContent = `已读取 ${files.length} 个文件，点击“获取最新验证码”开始查询。`;
+  } catch(e) { showToast('读取文件失败：' + e.message); }
+  event.target.value = '';
+});
+$('#btnOtpViewerClearInput').addEventListener('click', () => { $('#otpViewerInput').value=''; $('#otpViewerInput').focus(); });
+$('#btnOtpViewerClearResults').addEventListener('click', () => {
+  OTP_VIEWER_RESULTS = [];
+  renderOtpViewerResults();
+  $('#otpViewerMessage').classList.remove('is-error');
+  $('#otpViewerMessage').textContent = '查询结果已清空，输入内容仍保留。';
+});
+$('#otpViewerBody').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-otp-refresh]');
+  if (!button) return;
+  const index = Number(button.dataset.otpRefresh);
+  const row = OTP_VIEWER_RESULTS[index];
+  if (row?.source_line) fetchOtpViewer(row.source_line, index);
+});
+
+// ---------- 邮件查看 ----------
+function highlightMailPlus(value) {
+  return esc(value || '').replace(/\bplus\b/gi, match => `<mark>${match}</mark>`);
+}
+function renderMailViewerResults() {
+  const onlyPlus = $('#mailViewerPlusOnly').checked;
+  const mailboxes = MAIL_VIEWER_RESULTS || [];
+  const totalMessages = mailboxes.reduce((sum, box) => sum + Number(box.message_count || 0), 0);
+  const totalPlus = mailboxes.reduce((sum, box) => sum + Number(box.plus_count || 0), 0);
+  $('#mailViewerSummary').textContent = `邮箱 ${mailboxes.length} 个 · 邮件 ${totalMessages} 封 · PLUS ${totalPlus} 封`;
+  $('#mailViewerResults').innerHTML = mailboxes.map((box, boxIndex) => {
+    if (!box.ok) {
+      return `<section class="mailbox-result"><div class="mailbox-result-head"><div><strong>${esc(box.mailbox || '获取失败')}</strong><div class="mailbox-result-meta">${esc(box.url || '链接已隐藏')}</div></div><span class="plus-check-badge is-fail">${esc(box.error || '获取失败')}</span></div></section>`;
+    }
+    const allMessages = box.messages || [];
+    const visible = onlyPlus ? allMessages.filter(message => message.has_plus) : allMessages;
+    const status = box.plus_count
+      ? `<span class="mail-plus-badge">发现 PLUS ${esc(box.plus_count)} 封</span>`
+      : '<span class="plus-check-badge is-closed">未发现 PLUS</span>';
+    const messagesHtml = visible.map(message => {
+      const plusBadge = message.has_plus ? '<span class="mail-plus-badge">PLUS</span>' : '';
+      const body = message.body || '（邮件正文为空）';
+      return `<details class="mail-message ${message.has_plus ? 'has-plus' : ''}" ${message.has_plus ? 'open' : ''}>
+        <summary><div class="mail-message-subject"><span>${highlightMailPlus(message.subject || '（无主题）')}</span>${plusBadge}</div><div class="mail-message-info"><span>发件人：${esc(message.from || '-')}</span><span>时间：${esc(message.received_at || '-')}</span></div></summary>
+        <div class="mail-message-body"><div class="plus-check-actions" style="margin-bottom:8px;">${cbtn('复制正文', body, 'jobs-tb-btn')}</div><pre>${highlightMailPlus(body)}</pre></div>
+      </details>`;
+    }).join('') || `<div class="otp-viewer-empty">${onlyPlus ? '这个邮箱没有包含 PLUS 的邮件' : '没有识别到邮件'}</div>`;
+    return `<section class="mailbox-result">
+      <div class="mailbox-result-head"><div><strong>${esc(box.mailbox || '未知邮箱')}</strong><div class="mailbox-result-meta">${esc(box.url || '链接已隐藏')} · 获取于 ${esc(formatDateTime(box.fetched_at))}</div></div><div>${status}<button type="button" class="jobs-tb-btn" data-mail-viewer-refresh="${boxIndex}" style="margin-left:7px;">刷新</button></div></div>
+      <div class="mail-message-list">${messagesHtml}</div>
+    </section>`;
+  }).join('') || '<div class="otp-viewer-empty">暂无邮件结果</div>';
+}
+async function fetchMailViewer(sourceText=null, replaceIndex=null) {
+  const input = $('#mailViewerInput');
+  const text = sourceText == null ? input.value.trim() : String(sourceText).trim();
+  const messageBox = $('#mailViewerMessage');
+  const button = $('#btnMailViewerFetch');
+  if (!text) { showToast('请先粘贴邮箱查看链接'); return; }
+  if (replaceIndex == null) button.disabled = true;
+  messageBox.classList.remove('is-error');
+  messageBox.textContent = replaceIndex == null ? '正在读取全部邮件并检查 PLUS…' : '正在刷新该邮箱…';
+  try {
+    const result = await api('/api/mail-viewer/fetch', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})
+    });
+    const sourceLines = text.split(/\r?\n/);
+    const items = (result.items || []).map(item => ({
+      ...item,
+      source_line: sourceLines[Math.max(0, Number(item.line_no || 1)-1)] || text,
+    }));
+    if (replaceIndex == null) MAIL_VIEWER_RESULTS = items;
+    else if (items.length) MAIL_VIEWER_RESULTS.splice(replaceIndex, 1, items[0]);
+    renderMailViewerResults();
+    messageBox.textContent = `已读取 ${result.mailbox_count || 0} 个邮箱，共 ${result.message_count || 0} 封邮件，发现包含 PLUS 的邮件 ${result.plus_count || 0} 封。`;
+    if (result.failed_count) messageBox.classList.add('is-error');
+  } catch(e) {
+    messageBox.classList.add('is-error');
+    messageBox.textContent = '邮件读取失败：' + e.message;
+  } finally {
+    if (replaceIndex == null) button.disabled = false;
+  }
+}
+$('#btnMailViewerFetch').addEventListener('click', () => fetchMailViewer());
+$('#btnMailViewerClearInput').addEventListener('click', () => { $('#mailViewerInput').value=''; $('#mailViewerInput').focus(); });
+$('#btnMailViewerClearResults').addEventListener('click', () => {
+  MAIL_VIEWER_RESULTS = [];
+  renderMailViewerResults();
+  $('#mailViewerMessage').classList.remove('is-error');
+  $('#mailViewerMessage').textContent = '邮件结果已清空，输入链接仍保留。';
+});
+$('#mailViewerPlusOnly').addEventListener('change', renderMailViewerResults);
+$('#mailViewerResults').addEventListener('click', event => {
+  const button = event.target.closest('[data-mail-viewer-refresh]');
+  if (!button) return;
+  const index = Number(button.dataset.mailViewerRefresh);
+  const row = MAIL_VIEWER_RESULTS[index];
+  if (row?.source_line) fetchMailViewer(row.source_line, index);
+});
+
 // ---------- 注册 / 任务 ----------
 async function startRegistrationFromInputs(countEl, workersEl, startBtn) {
   const count = parseInt((countEl?.value || '1'), 10);
-  const workers = parseInt((workersEl?.value || '3'), 10);
+  let workers = parseInt((workersEl?.value || '3'), 10);
+  if (!Number.isFinite(workers) || workers < 1) workers = 3;
+  // 批量任务强制至少 2 并发，避免 UI 误把并发设成 1 导致串行
+  if (count >= 2 && workers < 2) {
+    workers = Math.min(count, 3);
+    if (workersEl) workersEl.value = String(workers);
+  }
+  workers = Math.max(1, Math.min(16, workers));
   const activeCount = Number(JOB_STATUS_COUNTS.active || 0);
   if (activeCount > 0) {
     const ok = confirm(
@@ -2565,16 +3552,64 @@ async function startRegistrationFromInputs(countEl, workersEl, startBtn) {
   const b2 = $('#btnStartV2'); if (b2) b2.disabled = true;
   try {
     const r = await api('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({count, workers}) });
-    const warnHtml = r.warning ? `<div class="banner warn">${esc(r.warning)}（本次并发 ${r.workers || workers}）</div>` : `<div class="banner info">已提交 ${r.submitted} 个任务，本次并发 ${r.workers || workers}</div>`;
+    const effective = r.workers || workers;
+    const warnHtml = r.warning
+      ? `<div class="banner warn">${esc(r.warning)}（本次并发 ${effective}）</div>`
+      : `<div class="banner info">已提交 ${r.submitted} 个任务，并发 ${effective}${r.requested_workers && r.requested_workers !== effective ? `（请求 ${r.requested_workers}，已自动调整）` : ''}</div>`;
     const warnEl = $('#regWarnV2'); if (warnEl) warnEl.innerHTML = warnHtml;
     const c2 = $('#regCountV2'); if (c2) c2.value = count;
-    const w2 = $('#regWorkersV2'); if (w2) w2.value = workers;
+    const w2 = $('#regWorkersV2'); if (w2) w2.value = effective;
     refreshJobs();
   } catch(e) {
     const warnEl = $('#regWarnV2'); if (warnEl) warnEl.innerHTML = `<div class="banner warn">${esc(e.message)}</div>`;
   }
   finally { setTimeout(restoreBtn, 3000); }
 }
+
+async function startMailLinkRegistration() {
+  const textEl = $('#mailLinkRegisterText');
+  const btn = $('#btnMailLinkRegister');
+  const warnEl = $('#mailLinkRegisterMessage');
+  const workersEl = $('#mailLinkRegisterWorkers');
+  const mailLinkText = String(textEl?.value || '').trim();
+  const workers = Math.max(1, Math.min(16, parseInt(workersEl?.value || '3', 10) || 3));
+  if (!mailLinkText) {
+    if (warnEl) warnEl.innerHTML = '<div class="banner warn">请先粘贴“邮箱----邮箱查看链接”，每行一条。</div>';
+    textEl?.focus();
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/jobs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mail_link_text: mailLinkText, workers}),
+    });
+    const errors = Array.isArray(r.errors) ? r.errors : [];
+    const details = errors.slice(0, 5).map(item => {
+      const line = item.line_no ? `第 ${item.line_no} 行：` : '';
+      return `${line}${item.reason || '未提交'}`;
+    });
+    const extra = details.length ? `<br>${details.map(esc).join('<br>')}` : '';
+    if (warnEl) {
+      warnEl.innerHTML = `<div class="banner ${errors.length ? 'warn' : 'info'}">` +
+        `已识别 ${r.parsed || 0} 条，提交 ${r.submitted || 0} 个注册任务` +
+        `${r.inserted ? `，新增邮箱 ${r.inserted}` : ''}` +
+        `${r.updated ? `，更新邮箱 ${r.updated}` : ''}` +
+        `${r.skipped ? `，跳过 ${r.skipped}` : ''}${extra}</div>`;
+    }
+    if (workersEl && r.workers) workersEl.value = r.workers;
+    if (textEl && r.submitted) textEl.value = '';
+    refreshJobs();
+    loadSummary();
+  } catch (e) {
+    if (warnEl) warnEl.innerHTML = `<div class="banner warn">${esc(e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function cancelAllPendingJobs(btn) {
   const pendingCount = Number(JOB_STATUS_COUNTS.pending || 0);
   const msg = pendingCount > 0
@@ -2616,8 +3651,6 @@ function bindJobsBodyEvents(bodyEl) {
     }
     const stopBtn = e.target.closest('[data-stop-job]');
     if (stopBtn) { stopJob(parseInt(stopBtn.dataset.stopJob, 10), stopBtn); return; }
-    const otpBtn = e.target.closest('[data-submit-otp-job]');
-    if (otpBtn) { submitManualOtpForJob(otpBtn); return; }
     const retryBtn = e.target.closest('[data-retry-job]');
     if (retryBtn) {
       if (retryBtn.dataset.pointerHandled === '1') {
@@ -2644,6 +3677,10 @@ function bindJobsBodyEvents(bodyEl) {
 (() => {
   const startV2 = $('#btnStartV2');
   if (startV2) startV2.addEventListener('click', () => startRegistrationFromInputs($('#regCountV2'), $('#regWorkersV2'), startV2));
+  const mailLinkRegister = $('#btnMailLinkRegister');
+  if (mailLinkRegister) mailLinkRegister.addEventListener('click', startMailLinkRegistration);
+  const mailLinkRegisterViewJobs = $('#btnMailLinkRegisterViewJobs');
+  if (mailLinkRegisterViewJobs) mailLinkRegisterViewJobs.addEventListener('click', () => activateTab('register'));
   const delV2 = $('#btnDeleteSelectedJobsV2');
   if (delV2) delV2.addEventListener('click', deleteSelectedJobs);
   const retryV2 = $('#btnRetrySelectedJobsV2');
@@ -2686,7 +3723,6 @@ function renderJobs() {
       const started = formatDateTime(j.started_at);
       const completed = formatDateTime(j.completed_at);
       const err = j.error_message || '';
-      const manualOtp = j.status === 'running' && j.email && j.manual_otp_required;
       return `
       <tr>
         <td class="col-check"><input type="checkbox" class="job-row-check" data-job-id="${esc(j.id)}" ${JOB_SELECTED.has(Number(j.id)) ? 'checked' : ''} ${running ? 'disabled title="运行中的任务不能选择"' : ''}></td>
@@ -2699,7 +3735,6 @@ function renderJobs() {
         <td class="col-actions">
           <div class="jobs-v2-ops">
             <button type="button" class="jobs-v2-op jobs-v2-op--view" data-log-job="${esc(j.id)}" title="查看日志">${icons.view}</button>
-            ${manualOtp ? `<input class="manual-otp-input manual-otp-input--v2" data-otp-email="${esc(j.email)}" data-otp-job="${esc(j.id)}" placeholder="邮箱验证码" maxlength="8" title="手动模式下，打开邮箱后把 6 位验证码贴这里"><button type="button" class="jobs-v2-op jobs-v2-op--otp" data-submit-otp-job="${esc(j.id)}" data-email="${esc(j.email)}" title="提交验证码">${icons.check}</button>` : ''}
             ${stoppable ? `<button type="button" class="jobs-v2-op jobs-v2-op--stop" data-stop-job="${esc(j.id)}" title="${j.status === 'stopping' ? '停止/修复' : '停止'}">${icons.stop}</button>` : ''}
             ${j.retryable ? `<button type="button" class="jobs-v2-op jobs-v2-op--retry" data-retry-job="${esc(j.id)}" title="${esc(j.retry_action === 'codex' ? '账号已创建，仅补跑 Codex 授权' : (j.retry_label || '重试'))}">${icons.retry}</button>` : ''}
             <button type="button" class="jobs-v2-op jobs-v2-op--del" data-delete-job="${esc(j.id)}" ${running ? 'disabled title="运行中的任务不能删除；如需删除请先停止"' : 'title="删除"'}>${icons.del}</button>
@@ -2795,29 +3830,6 @@ function closeQrModal() {
 }
 
 $('#btnCloseLog').addEventListener('click', closeLogModal);
-
-async function submitManualOtpForJob(btn) {
-  const jobId = parseInt(btn.dataset.submitOtpJob, 10);
-  const email = btn.dataset.email || '';
-  const input = document.querySelector(`.manual-otp-input[data-otp-job="${jobId}"]`);
-  const code = (input?.value || '').trim();
-  if (!code) { showToast('请先填写邮箱验证码'); return; }
-  btn.disabled = true;
-  try {
-    const r = await api('/api/manual-otp', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ email, code, job_id: jobId }),
-    });
-    showToast(r.ok ? `已提交验证码给 ${email || ('#'+jobId)}` : (r.error || '提交失败'));
-    if (input) input.value = '';
-    if (activeLogJob === jobId) pollLog();
-  } catch (e) {
-    showToast('提交验证码失败: ' + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
 
 async function stopJob(jobId, btn) {
   const job = JOBS.find(j => Number(j.id) === Number(jobId));
@@ -3096,7 +4108,8 @@ function _planCell(r) {
   const routeLabel = route === 'proxy' ? `网络: 代理${r.plan_check_proxy_used ? ` (${r.plan_check_proxy_used})` : ''}` :
     route === 'direct_fallback' ? `网络: 直连回退${r.plan_check_proxy_fallback_reason ? ` (${r.plan_check_proxy_fallback_reason})` : ''}` :
     route === 'direct' ? '网络: 直连' : '';
-  const title = [err ? esc(err) : checked, routeLabel].filter(Boolean).join('；');
+  const validityLabel = r.account_validity === 'valid' ? '账号有效' : (r.account_validity === 'invalid' ? '账号已失效' : (r.account_validity === 'unknown_proxy_or_policy' ? '账号状态无法判断（代理/风控）' : ''));
+  const title = [validityLabel, err ? esc(err) : checked, routeLabel].filter(Boolean).join('；');
   if (['queued','running'].includes(r.plan_check_status)) {
     const automatic = r.plan_check_trigger === 'registration_auto';
     const queued = r.plan_check_status === 'queued';
@@ -3107,11 +4120,14 @@ function _planCell(r) {
   }
   if (err || r.plan_check_status === 'failed') {
     const reason = err || '套餐查询失败，未返回具体原因';
+    const validity = r.account_validity;
+    const validityText = validity === 'invalid' ? '账号已失效' : (validity === 'unknown_proxy_or_policy' ? '账号状态无法判断（代理/风控）' : (validity === 'valid' ? '账号有效' : '账号状态未知'));
+    const validityClass = validity === 'invalid' ? 'status-failed' : (validity === 'valid' ? 'status-success' : 'status-used');
     const hasLastSuccess = Boolean(r.plan_last_success_at);
     const lastPlan = hasLastSuccess ? `${plan}${r.plus_trial_eligible ? '/可Plus试用' : ''}` : '';
     const lastText = lastPlan ? `（上次: ${lastPlan}）` : '';
     const lastTitle = hasLastSuccess ? `上次成功: ${esc(r.plan_last_success_at)}` : '';
-    return `<div class="extract-link-cell"><span class="pill status-failed" title="${[esc(reason), lastTitle].filter(Boolean).join('；')}">查询失败${esc(lastText)}</span><div class="extract-link-error" title="${esc(reason)}">${esc(reason)}</div></div>`;
+    return `<div class="extract-link-cell"><span class="pill ${validityClass}" title="${esc(validityText)}">${esc(validityText)}</span><span class="pill status-failed" title="${[esc(reason), lastTitle].filter(Boolean).join('；')}">查询失败${esc(lastText)}</span><div class="extract-link-error" title="${esc(reason)}">${esc(reason)}</div></div>`;
   }
   const lower = plan.toLowerCase();
 
@@ -3120,9 +4136,13 @@ function _planCell(r) {
     if (!checkedOk) {
       return `<span class="pill status-running" title="${title}">${esc(plan)}（待查资格）</span>`;
     }
-    const text = r.plus_trial_eligible ? 'free(可Plus试用)' : 'free';
-    const cls = r.plus_trial_eligible ? 'status-success' : 'status-used';
-    const t = r.plus_trial_eligible ? `${title}；Plus 试用资格可用` : title;
+    const couponFailed = !!r.plus_trial_coupon_error;
+    const yearlyEligible = !r.plus_trial_eligible && !!r.plus_yearly_new_user_eligible;
+    const text = r.plus_trial_eligible ? 'free(可Plus试用)' : (couponFailed ? 'free(试用查询失败)' : (yearlyEligible ? 'free(可购Plus年付)' : 'free'));
+    const cls = r.plus_trial_eligible ? 'status-success' : (couponFailed ? 'status-failed' : 'status-used');
+    const t = r.plus_trial_eligible
+      ? `${title}；Plus 一月免费试用资格可用`
+      : (couponFailed ? `${title}；试用资格接口失败：${r.plus_trial_coupon_error}` : (yearlyEligible ? `${title}；仅年付新用户资格，不是免费试用` : title));
     return `<span class="pill ${cls}" title="${t}">${esc(text)}</span>`;
   }
 
@@ -3151,7 +4171,7 @@ function _planAction(r) {
     const label = automatic ? (queued ? '自动查询排队中…' : '自动查询中…') : (queued ? '查询排队中…' : '查询中…');
     return `<button data-plan-check="${esc(r.id)}" disabled title="套餐查询正在执行，完成后可再次查询">${label}</button>`;
   }
-  return `<button data-plan-check="${esc(r.id)}" title="查询当前套餐；free 账号会检查 Plus 试用资格">查套餐</button>`;
+  return `<button data-account-validity="${esc(r.id)}" title="只检测 access_token 是否仍然有效">查账号存活</button><button data-plan-check="${esc(r.id)}" title="查询当前套餐；free 账号会检查 Plus 试用资格">查套餐</button>`;
 }
 function _fmtExtractExpire(v) {
   if (!v) return '';
@@ -3188,13 +4208,12 @@ function _extractLinkCell(r) {
   return '';
 }
 function _extractLinkAction(r) {
-  const s = r.extract_link_status || '';
-  if (['queued','running'].includes(s)) return `<button disabled title="${esc(r.extract_link_message || '提链任务执行中')}">提链中…</button>`;
+  if (['queued','running'].includes(r.extract_link_status || '')) {
+    return `<button type="button" data-extract-link="${esc(r.id)}" disabled title="PayPal 提链任务正在执行">PayPal 提链中</button>`;
+  }
   const plan = (r.current_plan_type || r.plan_type || '').toString().toLowerCase();
-  const eligible = plan === 'free' && !!r.plus_trial_eligible;
-  if (!eligible) return '';
-  const failedReason = s === 'failed' ? (r.extract_link_error || r.extract_link_message || '') : '';
-  return `<button class="good" data-extract-link="${esc(r.id)}" title="${esc(failedReason ? '重新提链；上次失败原因：' + failedReason : '为该 free(可Plus试用) 账号创建 PIX/UPI/KAKAO_PAY/IDEAL 提链任务')}">提链</button>`;
+  if (plan !== 'free' || !r.plus_trial_eligible) return '';
+  return `<button type="button" data-extract-link="${esc(r.id)}" title="使用本地 link-pp 生成 PayPal Billing Agreement 链">PayPal 提链</button>`;
 }
 function _codexAction(r) {
   const s = r.codex_status || '';
@@ -3215,6 +4234,8 @@ function _accountsV2MoreMenu(r) {
   const parts = [
     `<button type="button" data-account-copy-secret="copy_line" data-account-id="${esc(r.id)}">复制整行</button>`,
     `<button type="button" data-account-note="${esc(r.id)}" title="设置/清空该账号备注">备注</button>`,
+    `<button type="button" data-open-account-billing="${esc(r.id)}" title="使用保存的账号环境打开 ChatGPT 官方 Plus 页面">Plus 结账</button>`,
+    `<button type="button" data-open-account-browser="${esc(r.id)}" title="使用注册时保存的代理入口和浏览器指纹打开可见窗口">打开浏览器</button>`,
     _planAction(r),
     _extractLinkAction(r),
     _codexAction(r),
@@ -3291,7 +4312,7 @@ function updateAccountSelectionUi(pageRows = null) {
   const archiveLabel = SHOW_ARCHIVED_ACCOUNTS ? '恢复选中' : '归档选中';
   const archiveTitle = SHOW_ARCHIVED_ACCOUNTS ? '把选中的归档账号恢复到默认账号列表' : '归档选中的账号；默认账号列表将不再查询/显示这些账号';
   const v2Ids = [
-    'btnCheckSelectedPlansV2', 'btnExtractSelectedLinksV2',
+    'btnCheckSelectedValidityV2', 'btnCheckSelectedPlansV2', 'btnExtractSelectedLinksV2',
     'btnGenerateSelectedAgentV2', 'btnDownloadSelectedAgentV2', 'btnUploadSelectedAgentSub2V2',
     'btnRetrySelectedCodexV2', 'btnDownloadSelectedCpaV2', 'btnStopSelectedCodexV2',
     'btnNoteSelectedAccountsV2', 'btnCopySelectedLinesV2',
@@ -3377,7 +4398,31 @@ async function onAccountsBodyClick(e) {
     try {
       const value = await fetchOneAccountSecret(id, field);
       if (!value) { showToast('可复制内容为空'); return; }
-      copyText(value);
+      const copied = await copyText(value, {notify: false});
+      if (!copied) {
+        const fallback = document.createElement('textarea');
+        fallback.value = value;
+        fallback.readOnly = true;
+        fallback.setAttribute('aria-label', 'Token');
+        fallback.style.position = 'fixed';
+        fallback.style.left = '12px';
+        fallback.style.bottom = '12px';
+        fallback.style.zIndex = '9999';
+        fallback.style.width = 'min(720px, calc(100vw - 24px))';
+        fallback.style.minHeight = '72px';
+        fallback.style.padding = '10px';
+        fallback.style.background = '#fff';
+        fallback.style.border = '1px solid #377DFF';
+        fallback.style.borderRadius = '6px';
+        fallback.style.boxShadow = '0 4px 18px rgba(0,0,0,.18)';
+        document.body.appendChild(fallback);
+        fallback.focus();
+        fallback.select();
+        fallback.setSelectionRange(0, fallback.value.length);
+        showToast('自动复制失败，Token 已选中，请按 Ctrl+C');
+        setTimeout(() => fallback.remove(), 10000);
+        return;
+      }
       showToast(field === 'access_token' ? 'Token 已复制' : field === 'codex_agent_token' ? 'Agent Token 已复制' : '账号整行已复制');
     } catch(err) {
       showToast('复制失败: ' + err.message);
@@ -3390,6 +4435,24 @@ async function onAccountsBodyClick(e) {
   const planBtn = e.target.closest('[data-plan-check]');
   if (planBtn) {
     await checkOnePlan(Number(planBtn.dataset.planCheck), planBtn);
+    return;
+  }
+
+  const validityBtn = e.target.closest('[data-account-validity]');
+  if (validityBtn) {
+    await checkAccountValidity(Number(validityBtn.dataset.accountValidity), validityBtn);
+    return;
+  }
+
+  const browserBtn = e.target.closest('[data-open-account-browser]');
+  if (browserBtn) {
+    await openSavedAccountBrowser(Number(browserBtn.dataset.openAccountBrowser), browserBtn);
+    return;
+  }
+
+  const billingBtn = e.target.closest('[data-open-account-billing]');
+  if (billingBtn) {
+    await openOfficialBilling(Number(billingBtn.dataset.openAccountBilling), billingBtn);
     return;
   }
 
@@ -3682,6 +4745,27 @@ async function downloadSelectedCpa() {
   }
 }
 
+async function checkAccountValidity(id, btn) {
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '检测中…';
+  try {
+    const r = await api('/api/accounts/check-validity', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_id: id}),
+    });
+    showToast(r.message || '账号存活检测已加入后台队列');
+    await pollAccountPlanStatuses();
+  } catch(err) {
+    showToast(err.message);
+    await pollAccountPlanStatuses();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
 async function checkOnePlan(id, btn) {
   btn.disabled = true;
   const old = btn.textContent;
@@ -3710,7 +4794,7 @@ async function extractOneLink(id, btn) {
     showToast('仅支持 free(可Plus试用) 账号提链');
     return;
   }
-  if (!confirm(`确定为该账号提链吗？\n\n${acc.email || ('#' + id)}\n\n提链类型按配置使用 PIX/UPI/KAKAO_PAY/IDEAL，成功会消耗 1 次 CDK。`)) return;
+  if (!confirm(`确定为该账号生成 PayPal BA 链吗？\n\n${acc.email || ('#' + id)}\n\n将调用本地 link-pp，并使用 BR 代理出口和 DE/EUR 账单。`)) return;
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = '提链中…';
@@ -3735,7 +4819,7 @@ async function extractSelectedLinks() {
   const selected = ids.map(id => ACCOUNTS.find(a => Number(a.id) === Number(id))).filter(Boolean);
   const eligible = selected.filter(a => (a.current_plan_type || a.plan_type || '').toString().toLowerCase() === 'free' && !!a.plus_trial_eligible);
   if (!eligible.length) { showToast('选中账号里没有 free(可Plus试用)'); return; }
-  if (!confirm(`确定批量提链 ${eligible.length} 个 free(可Plus试用) 账号吗？\n\n非可试用账号会自动跳过。成功会按账号消耗 CDK 次数。`)) return;
+  if (!confirm(`确定批量生成 ${eligible.length} 个 PayPal BA 链吗？\n\n非 free(可Plus试用) 账号会自动跳过。`)) return;
   const btn = $('#btnExtractSelectedLinksV2');
   const old = btn.textContent;
   btn.disabled = true;
@@ -3940,6 +5024,30 @@ async function checkSelectedPlans() {
     await pollAccountPlanStatuses();
   } catch(err) {
     showToast('批量查询失败: ' + err.message);
+    updateAccountSelectionUi();
+  } finally {
+    btn.textContent = old;
+  }
+}
+
+async function checkSelectedAccountValidity() {
+  const ids = Array.from(ACCOUNT_SELECTED);
+  if (ids.length === 0) { showToast('请先选择账号'); return; }
+  const btn = $('#btnCheckSelectedValidityV2');
+  if (!btn) return;
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '检测中…';
+  try {
+    const r = await api('/api/accounts/check-validity-bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_ids: ids}),
+    });
+    showToast(`已加入 ${r.started_count || 0} 个存活检测，正在检测 ${r.busy_count || 0} 个，入队失败 ${r.failed_count || 0} 个`);
+    await pollAccountPlanStatuses();
+  } catch(err) {
+    showToast('批量存活检测失败: ' + err.message);
     updateAccountSelectionUi();
   } finally {
     btn.textContent = old;
@@ -4171,6 +5279,7 @@ async function copySelectedAccountTokens() {
     if (el) el.addEventListener('click', fn);
   };
   bind('btnCheckSelectedPlansV2', checkSelectedPlans);
+  bind('btnCheckSelectedValidityV2', checkSelectedAccountValidity);
   bind('btnExtractSelectedLinksV2', extractSelectedLinks);
   bind('btnGenerateSelectedAgentV2', generateSelectedCodexAgents);
   bind('btnDownloadSelectedAgentV2', downloadSelectedCodexAgents);
@@ -5146,6 +6255,103 @@ function setRegistrationDriverValue(value) {
   bindRoxyWorkspaceToolsV2();
   bindCloudMailToolsV2();
 }
+// ---------- 邮箱模式快速切换（注册页工具条） ----------
+function fallbackEmailSourceOptions() {
+  return [
+    { value: 'outlook', label: 'Outlook 账号池' },
+    { value: 'generic_api', label: '通用 API 邮箱池' },
+    { value: 'cloudflare_domain', label: 'Cloudflare 域名邮箱(转发QQ)' },
+    { value: 'cloudflare', label: 'Cloudflare Worker 临时邮箱' },
+    { value: 'gptmail', label: 'GPTMail 临时邮箱' },
+    { value: 'mailnest', label: 'MailNest 迈巢临时邮箱' },
+    { value: 'cloudmail', label: 'CloudMail 临时邮箱' },
+    { value: 'throwaway', label: 'Throwaway 临时邮箱' },
+    { value: 'gonebox', label: 'GoneBox 临时邮箱' },
+  ];
+}
+function getEmailSourceField() {
+  return (CONFIG || []).find(f => f.key === 'EMAIL_SOURCE') || null;
+}
+function getEmailModeOptions() {
+  const f = getEmailSourceField();
+  if (f && Array.isArray(f.options) && f.options.length) return f.options;
+  return fallbackEmailSourceOptions();
+}
+function getEmailModeValue() {
+  const f = getEmailSourceField();
+  if (!f) return '';
+  return String(f.value == null ? '' : f.value).trim();
+}
+function emailModeLabel(value) {
+  const cur = String(value || '').trim();
+  if (!cur) return '—';
+  const opts = getEmailModeOptions();
+  return cur.split(',').map(s => s.trim()).filter(Boolean).map(p => {
+    const hit = opts.find(o => String(o.value) === p);
+    return hit ? String(hit.label || hit.value) : p;
+  }).join(' + ');
+}
+function renderEmailModeSelect() {
+  const mount = document.getElementById('emailModeSelectV2');
+  if (!mount) return;
+  const cur = getEmailModeValue();
+  const label = emailModeLabel(cur);
+  const activeVal = cur.split(',')[0].trim();
+  const items = getEmailModeOptions().map(o => `
+    <button type="button" class="config-ep-select-item${String(o.value) === activeVal ? ' is-active' : ''}" role="option" data-email-mode-value="${attrEsc(o.value)}">${esc(o.label != null ? o.label : o.value)}</button>
+  `).join('');
+  mount.innerHTML = `
+    <button type="button" class="config-ep-select-btn" data-ep-toggle="emailModeSelectV2">${esc(label)}</button>
+    <div class="config-ep-select-menu" role="listbox">${items}</div>
+    <input type="hidden" data-key="EMAIL_SOURCE" value="${attrEsc(cur)}">
+  `;
+}
+async function loadEmailModeOptions() {
+  const mount = document.getElementById('emailModeSelectV2');
+  if (!mount) return;
+  try {
+    if (!CONFIG.length) CONFIG = await api('/api/config');
+    renderEmailModeSelect();
+  } catch(e) {
+    const btn = mount.querySelector('.config-ep-select-btn');
+    if (btn) btn.textContent = '加载失败';
+  }
+}
+async function setEmailModeValue(value) {
+  const f = getEmailSourceField();
+  const opts = getEmailModeOptions();
+  const hit = opts.find(o => String(o.value) === String(value));
+  const label = hit ? String(hit.label || hit.value) : String(value);
+  try {
+    const r = await api('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates: { EMAIL_SOURCE: String(value) } }),
+    });
+    if (f) f.value = String(value);
+    delete CONFIG_PENDING_UPDATES.EMAIL_SOURCE;
+    closeConfigEpSelects();
+    renderEmailModeSelect();
+    const secs = document.getElementById('configSectionsV2');
+    if (secs && secs.children.length) renderConfigLayoutV2();
+    showToast(r.reloaded ? `已切换到 ${label} 邮箱模式并生效` : `已切换到 ${label} 邮箱模式`);
+  } catch(e) {
+    showToast('切换邮箱模式失败: ' + e.message);
+  }
+}
+$('#tab-register').addEventListener('click', (e) => {
+  const toggle = e.target.closest('[data-ep-toggle]');
+  if (toggle && toggle.dataset.epToggle === 'emailModeSelectV2') {
+    toggleConfigEpSelect('emailModeSelectV2', e);
+    return;
+  }
+  const item = e.target.closest('[data-email-mode-value]');
+  if (item) {
+    e.preventDefault();
+    e.stopPropagation();
+    setEmailModeValue(item.dataset.emailModeValue);
+  }
+});
 function renderRegistrationEpSelect(mount, wrapId) {
   if (!mount) return;
   const cur = getRegistrationDriverValue();
@@ -5209,6 +6415,8 @@ function renderConfigPlainFieldV2(f) {
     control = `<input type="number" step="0.1" data-key="${attrEsc(f.key)}" value="${attrEsc(fv == null ? '' : fv)}">`;
   } else if (f.type === 'list_str_multiline') {
     control = `<textarea data-key="${attrEsc(f.key)}" placeholder="每行一条，可留空">${attrEsc((fv || []).join('\n'))}</textarea>`;
+  } else if (f.type === 'select' && Array.isArray(f.options)) {
+    control = renderGenericSelectFieldV2(f);
   } else {
     const shown = isPlaceholderEmpty(fv) ? '' : fv;
     const inputType = f.secret ? 'password' : 'text';
@@ -5222,6 +6430,30 @@ function renderConfigPlainFieldV2(f) {
       ${control}
     </label>
   `;
+}
+function renderGenericSelectFieldV2(f) {
+  const fv = Object.prototype.hasOwnProperty.call(CONFIG_PENDING_UPDATES, f.key) ? CONFIG_PENDING_UPDATES[f.key] : f.value;
+  const cur = String(fv == null ? '' : fv).trim();
+  const wrapId = 'cfgSel-' + String(f.key).replace(/[^A-Za-z0-9_]/g, '');
+  const opts = Array.isArray(f.options) ? f.options : [];
+  const activeVal = cur.split(',')[0].trim();
+  const hit = opts.find(o => String(o.value) === cur);
+  const label = hit ? String(hit.label || hit.value) : (cur || '—');
+  const items = opts.map(o => `
+    <button type="button" class="config-ep-select-item${String(o.value) === activeVal ? ' is-active' : ''}" role="option" data-generic-select-key="${attrEsc(f.key)}" data-generic-select-value="${attrEsc(o.value)}">${esc(o.label != null ? o.label : o.value)}</button>
+  `).join('');
+  return `
+    <div class="config-ep-select" id="${wrapId}">
+      <button type="button" class="config-ep-select-btn" data-ep-toggle="${wrapId}">${esc(label)}</button>
+      <div class="config-ep-select-menu" role="listbox">${items}</div>
+      <input type="hidden" data-key="${attrEsc(f.key)}" value="${attrEsc(cur)}">
+    </div>
+  `;
+}
+function setGenericSelectValueV2(key, value) {
+  CONFIG_PENDING_UPDATES[key] = String(value);
+  closeConfigEpSelects();
+  renderConfigLayoutV2();
 }
 function renderMixedConfigSectionV2(name, fields, intro) {
   const slug = configGroupSlug(name);
@@ -5630,6 +6862,13 @@ function bindConfigLayoutV2() {
         setCodexOauthDriverValue(oauthItem.dataset.codexOauthValue);
         return;
       }
+      const genericItem = e.target.closest('[data-generic-select-value]');
+      if (genericItem) {
+        e.preventDefault();
+        e.stopPropagation();
+        setGenericSelectValueV2(genericItem.dataset.genericSelectKey, genericItem.dataset.genericSelectValue);
+        return;
+      }
     });
   }
   if (!document.documentElement.dataset.configEpCloseBound) {
@@ -5778,11 +7017,25 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- 初始化 ----------
+// 轮询降频：原先 jobs 3s + summary 5s + plan-check 2s，页面一开就对 Flask 开发服狂打，
+// 叠加注册线程时容易把 5000 打到「失去连接」。Waitress 后仍保持克制。
 loadSummary();
-activateTab(localStorage.getItem('gpt_console_active_tab') || 'register', false);
-jobsTimer = setInterval(() => { if (!$('#tab-register').classList.contains('hidden')) refreshJobs(); }, 3000);
-setInterval(loadSummary, 5000);
-setInterval(() => { if (!$('#tab-accounts').classList.contains('hidden')) pollAccountPlanStatuses(); }, 2000);
+if (!document.documentElement.dataset.configEpCloseBound) {
+  document.documentElement.dataset.configEpCloseBound = '1';
+  document.addEventListener('click', () => closeConfigEpSelects());
+}
+loadEmailModeOptions();
+const initialTab = new URLSearchParams(window.location.search).get('tab') || localStorage.getItem('gpt_console_active_tab') || 'register';
+activateTab(initialTab, false);
+jobsTimer = setInterval(() => { if (!$('#tab-register').classList.contains('hidden')) refreshJobs(); }, 8000);
+setInterval(loadSummary, 15000);
+setInterval(() => { if (!$('#tab-accounts').classList.contains('hidden')) pollAccountPlanStatuses(); }, 8000);
+setInterval(() => {
+  if (!$('#tab-plus-check').classList.contains('hidden')) {
+    loadPlusCheckAccounts();
+    loadPlusLinkLoginJobs();
+  }
+}, 4000);
 </script>
 </body>
 </html>

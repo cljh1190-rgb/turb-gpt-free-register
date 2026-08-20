@@ -12,17 +12,19 @@ from config.env_loader import env_str, apply_env_overrides
 
 # True: REGISTER_EMAIL 留空时从 Outlook 账号池自动获取邮箱，OTP 自动收取
 # False: 走人工输入邮箱 + 人工填 OTP 的流程
-USE_EMAIL_SERVICE = False
+USE_EMAIL_SERVICE = True
 
 # 可选值（也可以用英文逗号配置多个，按顺序兜底，例如 "outlook,generic_api,mailnest"）：
 #   "outlook"           — 外购 Outlook 账号池 + mail.chatai.codes 远端取信
 #   "cloudflare_domain" — Cloudflare 域名邮箱（转发到 QQ 邮箱），通过 IMAP 取信
 #   "cloudflare" — Cloudflare Worker 临时邮箱（cloudflare_temp_email），API 创建并取码
-#   "generic_api"       — 通用 API 取码邮箱池（邮箱----取码地址）
+#   "generic_api"       — 通用 API 取码邮箱池（邮箱----取码地址或邮箱----密码----取码地址）
 #   "gptmail"           — GPTMail 临时邮箱 API（运行时随机生成邮箱并自动收码）
 #   "mailnest"          — MailNest/迈巢临时邮箱 API（运行时购买邮箱并自动收码）
 #   "cloudmail"         — CloudMail/Cloud Mail API（自动从平台获取域名并随机生成邮箱）
-EMAIL_SOURCE = "outlook,generic_api,mailnest"
+#   "throwaway"         — Throwaway.io 公共临时邮箱（随机域名，10 分钟有效，自动收码）
+#   "gonebox"           — GoneBox 一次性临时邮箱（gonebox.email 等，1 小时有效，自动收码）
+EMAIL_SOURCE = "throwaway"
 
 
 # ============================================================
@@ -147,5 +149,31 @@ CLOUDMAIL_AUTO_ADD_USER = True
 # 随机邮箱 local-part 长度。
 CLOUDMAIL_RANDOM_LOCAL_LENGTH = 12
 
+# ============================================================
+# Throwaway.io 公共临时邮箱：https://www.throwaway.io/en
+# ============================================================
+
+THROWAWAY_API_BASE = "https://www.throwaway.io/api/ai/v1"
+THROWAWAY_REQUEST_TIMEOUT = 20
+THROWAWAY_DOMAIN_CACHE_SECONDS = 300
+
+
+# ============================================================
+# GoneBox 一次性临时邮箱：https://gonebox.email
+# ============================================================
+
+# REST API 根地址（已含 /api/v1）。目前匿名即可调用；填写 key 则自动附带 X-API-Key 头。
+GONEBOX_API_BASE = "https://api.gonebox.email/api/v1"
+
+# 可选 API Key（官方文档声明付费套餐才提供 API，但匿名调用当前可用；留空即匿名）。
+GONEBOX_API_KEY = env_str("GONEBOX_API_KEY", "")
+
+GONEBOX_REQUEST_TIMEOUT = 20
+
+# 默认收件域名：gonebox.email / sumiu.email / nemexiste.email
+GONEBOX_DEFAULT_DOMAIN = "gonebox.email"
+
+GONEBOX_DOMAIN_CACHE_SECONDS = 300
+
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'USE_EMAIL_SERVICE': 'bool', 'OTP_MAX_WAIT': 'int', 'OTP_POLL_INTERVAL': 'int', 'EMAIL_SOURCE': 'str', 'EMAIL_DOMAIN': 'str', 'QQ_EMAIL': 'str', 'QQ_IMAP_PASSWORD': 'str', 'GPTMAIL_API_KEY': 'str', 'OUTLOOK_FETCH_MODE': 'str', 'MAIL_NEST_API_KEY': 'str', 'MAIL_NEST_PROJECT_CODE': 'str', 'CLOUDFLARE_API_BASE': 'str', 'CLOUDFLARE_API_KEY': 'str', 'CLOUDFLARE_AUTH_MODE': 'str', 'CLOUDFLARE_CUSTOM_AUTH': 'str', 'CLOUDFLARE_PATH_DOMAINS': 'str', 'CLOUDFLARE_PATH_ACCOUNTS': 'str', 'CLOUDFLARE_PATH_TOKEN': 'str', 'CLOUDFLARE_PATH_MESSAGES': 'str', 'CLOUDFLARE_DEFAULT_DOMAINS': 'list_str_multiline', 'CLOUDFLARE_REQUEST_TIMEOUT': 'int', 'CLOUDFLARE_NAME_LENGTH': 'int', 'CLOUDMAIL_API_BASE': 'str', 'CLOUDMAIL_ADMIN_EMAIL': 'str', 'CLOUDMAIL_PASSWORD': 'str', 'CLOUDMAIL_TOKEN_PATH': 'str', 'CLOUDMAIL_AUTH_TOKEN': 'str', 'CLOUDMAIL_DOMAINS': 'list_str_multiline', 'CLOUDMAIL_AUTO_ADD_USER': 'bool', 'CLOUDMAIL_RANDOM_LOCAL_LENGTH': 'int'})
+apply_env_overrides(globals(), {'USE_EMAIL_SERVICE': 'bool', 'OTP_MAX_WAIT': 'int', 'OTP_POLL_INTERVAL': 'int', 'EMAIL_SOURCE': 'str', 'EMAIL_DOMAIN': 'str', 'QQ_EMAIL': 'str', 'QQ_IMAP_PASSWORD': 'str', 'GPTMAIL_API_KEY': 'str', 'OUTLOOK_FETCH_MODE': 'str', 'MAIL_NEST_API_KEY': 'str', 'MAIL_NEST_PROJECT_CODE': 'str', 'CLOUDFLARE_API_BASE': 'str', 'CLOUDFLARE_API_KEY': 'str', 'CLOUDFLARE_AUTH_MODE': 'str', 'CLOUDFLARE_CUSTOM_AUTH': 'str', 'CLOUDFLARE_PATH_DOMAINS': 'str', 'CLOUDFLARE_PATH_ACCOUNTS': 'str', 'CLOUDFLARE_PATH_TOKEN': 'str', 'CLOUDFLARE_PATH_MESSAGES': 'str', 'CLOUDFLARE_DEFAULT_DOMAINS': 'list_str_multiline', 'CLOUDFLARE_REQUEST_TIMEOUT': 'int', 'CLOUDFLARE_NAME_LENGTH': 'int', 'CLOUDMAIL_API_BASE': 'str', 'CLOUDMAIL_ADMIN_EMAIL': 'str', 'CLOUDMAIL_PASSWORD': 'str', 'CLOUDMAIL_TOKEN_PATH': 'str', 'CLOUDMAIL_AUTH_TOKEN': 'str', 'CLOUDMAIL_DOMAINS': 'list_str_multiline', 'CLOUDMAIL_AUTO_ADD_USER': 'bool', 'CLOUDMAIL_RANDOM_LOCAL_LENGTH': 'int', 'THROWAWAY_API_BASE': 'str', 'THROWAWAY_REQUEST_TIMEOUT': 'int', 'THROWAWAY_DOMAIN_CACHE_SECONDS': 'int', 'GONEBOX_API_BASE': 'str', 'GONEBOX_API_KEY': 'str', 'GONEBOX_REQUEST_TIMEOUT': 'int', 'GONEBOX_DEFAULT_DOMAIN': 'str', 'GONEBOX_DOMAIN_CACHE_SECONDS': 'int'})

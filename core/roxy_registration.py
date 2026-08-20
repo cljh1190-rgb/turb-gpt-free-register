@@ -176,6 +176,41 @@ def _email_entry_state(driver) -> dict:
         return {"url": getattr(driver, "current_url", ""), "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _is_security_interstitial_state(state: dict | None) -> bool:
+    """Detect Cloudflare/browser verification pages shown before login."""
+    if not isinstance(state, dict):
+        return False
+    haystack = " ".join(
+        str(state.get(key) or "")
+        for key in ("title", "url", "error", "text")
+    ).lower()
+    return any(marker in haystack for marker in (
+        "just a moment",
+        "checking your browser",
+        "verify you are human",
+        "verification required",
+        "security verification",
+        "attention required",
+        "/cdn-cgi/challenge",
+        "challenge-platform",
+    ))
+
+
+def _is_chrome_error_state(state: dict | None) -> bool:
+    """浏览器网络错误页（代理断连/卡顿/目标不可达）。"""
+    if not isinstance(state, dict):
+        return False
+    url = str(state.get("url") or "").lower()
+    return "chrome-error" in url or url.startswith("chrome-error://")
+
+
+def _network_error_exc(state) -> RuntimeError:
+    """抛出一个会被 is_proxy_lag_error 识别为可换出口的网络错误。"""
+    return RuntimeError(
+        f"network_error: 浏览器网络错误页(chrome-error)，疑似代理断连/卡顿，需更换出口，state={state}"
+    )
+
+
 def _find_visible_email_input_js(driver):
     return driver.execute_script(r"""
     const visible = el => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
@@ -185,12 +220,39 @@ def _find_visible_email_input_js(driver):
       'input[type="email"]',
       'input[name="email"]',
       'input[name="username"]',
+      'input[name="loginfmt"]',
+      'input[name="identifier"]',
       'input#email-input',
-      'input[autocomplete="email"]'
+      'input#username',
+      'input[autocomplete="email"]',
+      'input[autocomplete="username"]',
+      'input[inputmode="email"]',
+      'input[id*="email" i]',
+      'input[id*="username" i]',
+      'input[aria-label*="email" i]',
+      'input[aria-label*="邮箱"]',
+      'input[aria-label*="メール"]',
+      'input[placeholder*="email" i]',
+      'input[placeholder*="邮箱"]',
+      'input[placeholder*="メール"]',
+      'input[placeholder*="Email"]'
     ];
     for (const sel of selectors) {
-      const el = [...document.querySelectorAll(sel)].find(visible);
-      if (el) return el;
+      try {
+        const el = [...document.querySelectorAll(sel)].find(visible);
+        if (el) return el;
+      } catch (e) {}
+    }
+    // 兜底：单个可见 text input 且位于登录表单内
+    const texts = [...document.querySelectorAll('input[type="text"],input:not([type])')].filter(visible);
+    if (texts.length === 1) {
+      const t = texts[0];
+      const form = t.closest('form');
+      const hint = [t.name, t.id, t.getAttribute('autocomplete'), t.getAttribute('placeholder'), t.getAttribute('aria-label')]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (/email|user|login|mail|账号|邮箱/.test(hint) || (form && form.querySelector('button[type="submit"],input[type="submit"]'))) {
+        return t;
+      }
     }
     return null;
     """)
@@ -271,21 +333,89 @@ def _click_email_entry_option(driver) -> bool:
 
 def _type_email_address(driver, email: str, timeout: int | None = None) -> None:
     """进入邮箱登录/注册方式并填写邮箱。全程不依赖页面可见文字，避免非日本出口本地化后误点 Google。"""
-    end = time.time() + (timeout or int(_cfg.ROXY_SELENIUM_TIMEOUT))
+    started_at = time.time()
+    base_timeout = max(1, int(timeout or int(_cfg.ROXY_SELENIUM_TIMEOUT)))
+    end = started_at + base_timeout
+    # Browser verification often needs longer than the normal form-render wait.
+    # Extend once, but keep a hard bound so the outer layer can rotate a bad IP.
+    challenge_deadline = started_at + min(120, base_timeout + max(45, base_timeout))
     last_state = None
     clicked_email_option = False
+    last_url = ""
+    challenge_seen_at = None
+    challenge_last_log_at = 0.0
     while time.time() < end:
+        try:
+            url = str(driver.current_url or "")
+        except Exception:
+            url = ""
+        if url and url != last_url:
+            logger.info("%s 等待邮箱输入框：url=%s", _log_prefix(driver), url[:180])
+            last_url = url
         el = _find_visible_email_input_js(driver)
         if el:
             _set_element_value(driver, el, email)
             return
         last_state = _email_entry_state(driver)
+        if _is_chrome_error_state(last_state):
+            raise _network_error_exc(last_state)
+        # 落地到 ChatGPT 首页/未知页（非登录页）时主动跳登录页，避免“找不到邮箱输入框”
+        try:
+            _u = str(driver.current_url or "").lower()
+        except Exception:
+            _u = ""
+        if "chatgpt.com" in _u and "/auth/" not in _u and "auth.openai.com" not in _u and "/api/auth/" not in _u:
+            logger.info("%s 落地非登录页(%s)，主动跳转 /auth/login", _log_prefix(driver), _u[:120])
+            try:
+                driver.get("https://chatgpt.com/auth/login")
+                time.sleep(1.0)
+                continue
+            except Exception:
+                pass
+        if _is_security_interstitial_state(last_state):
+            now = time.time()
+            if challenge_seen_at is None:
+                challenge_seen_at = now
+                end = max(end, challenge_deadline)
+            if now - challenge_last_log_at >= 5.0:
+                logger.warning(
+                    "%s 检测到浏览器安全验证页，等待自动放行：elapsed=%.1fs title=%s url=%s",
+                    _log_prefix(driver),
+                    now - challenge_seen_at,
+                    str(last_state.get("title") or "")[:100],
+                    str(last_state.get("url") or url)[:180],
+                )
+                challenge_last_log_at = now
+            _check_manual_stop()
+            time.sleep(1.0)
+            continue
+        if challenge_seen_at is not None:
+            logger.info(
+                "%s 浏览器安全验证已放行，继续查找邮箱入口：elapsed=%.1fs url=%s",
+                _log_prefix(driver),
+                time.time() - challenge_seen_at,
+                url[:180],
+            )
+            challenge_seen_at = None
+        # oauth/authorize 常先落地再跳到 log-in；给跳转一点时间，不要立刻点第三方入口
+        if "oauth/authorize" in url.lower() and "log-in" not in url.lower():
+            time.sleep(0.5)
+            continue
         if not clicked_email_option and _click_email_entry_option(driver):
             clicked_email_option = True
             time.sleep(1.0)
             _assert_not_external_idp(driver, "点击邮箱入口后")
             continue
+        # 入口可能晚渲染：每几秒再试一次入口点击
+        if clicked_email_option and int(end - time.time()) % 4 == 0:
+            clicked_email_option = False
         time.sleep(0.4)
+    if _is_chrome_error_state(last_state):
+        raise _network_error_exc(last_state)
+    if challenge_seen_at is not None or _is_security_interstitial_state(last_state):
+        raise RuntimeError(
+            f"challenge_stuck: 浏览器安全验证页长时间未放行，需要更换代理出口，state={last_state}"
+        )
     raise RuntimeError(f"找不到邮箱输入框/邮箱入口（未使用文字识别），state={last_state}")
 
 
@@ -422,6 +552,8 @@ def _wait_email_submit_next_state(driver, email: str, timeout: int = 18) -> str:
         if _is_signup_password_page(driver):
             return "password"
         state = _email_input_value_state(driver)
+        if _is_chrome_error_state(state):
+            raise _network_error_exc(state)
         last = state
         inputs = state.get("inputs") or []
         if inputs:
@@ -565,39 +697,125 @@ def _clear_otp_inputs(driver) -> None:
         pass
 
 
+def _element_visible_text(el) -> str:
+    """兼容 Selenium WebElement 与 CloakElement，安全读取可见文本。"""
+    if el is None:
+        return ""
+    for getter in (
+        lambda: getattr(el, "text", None),
+        lambda: el.get_attribute("textContent") if hasattr(el, "get_attribute") else None,
+        lambda: el.get_attribute("innerText") if hasattr(el, "get_attribute") else None,
+        lambda: el.get_attribute("value") if hasattr(el, "get_attribute") else None,
+        lambda: el.get_attribute("aria-label") if hasattr(el, "get_attribute") else None,
+        lambda: el.get_attribute("data-dd-action-name") if hasattr(el, "get_attribute") else None,
+    ):
+        try:
+            val = getter()
+            if val is not None and str(val).strip():
+                return str(val).strip()
+        except Exception:
+            continue
+    return ""
+
+
 def _click_resend_email_otp(driver, timeout: int = 20) -> dict:
-    """点击重新发送邮箱验证码。优先按 DOM 属性识别，文本仅兜底。"""
+    """点击重新发送邮箱验证码。优先按 DOM 属性识别，文本仅兜底。
+
+    注意：Cloak 适配层返回的是 CloakElement，没有 Selenium 的 .text；
+    以前在 btn.text 上 AttributeError 被吞掉，会误报「找不到按钮」——
+    页面其实已有 value=resend 的 Resend email 按钮。
+    """
     end = time.time() + timeout
     last = None
     while time.time() < end:
         try:
+            # 优先：纯 JS 找到并点击，避免依赖元素包装器属性
+            clicked = driver.execute_script(r"""
+            const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length))
+              && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none';
+            const enabled = el => !el.disabled && String(el.getAttribute('aria-disabled') || '').toLowerCase() !== 'true';
+            const candidates = [...document.querySelectorAll('button,a,[role=button],[role=link],input[type=button],input[type=submit]')].filter(visible);
+            const scoreOf = el => {
+              if (!enabled(el)) return -1;
+              const name = String(el.getAttribute('name') || '').toLowerCase();
+              const value = String(el.getAttribute('value') || '').toLowerCase();
+              const type = String(el.getAttribute('type') || '').toLowerCase();
+              const attrs = [el.id, name, value, type, el.getAttribute('data-dd-action-name'), el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid'), el.className]
+                .join(' ').toLowerCase();
+              const text = String(el.innerText || el.textContent || el.value || '').toLowerCase();
+              let score = 0;
+              // OpenAI 当前页：<button type="submit" value="resend">Resend email</button>
+              if (value === 'resend') score += 200;
+              if (name === 'intent' && value === 'resend') score += 200;
+              if (/resend/.test(attrs) || /resend/.test(text)) score += 80;
+              if (/send.*again|again|erneut|重新发送|重发|再次发送|再送信|新しい|届かない|send\s+(?:a\s+)?new\s+code/.test(text + ' ' + attrs)) score += 60;
+              // 排除主提交 Continue/validate
+              if (value === 'validate' || /^(continue|weiter|继续|続行)$/i.test(text.trim())) score -= 100;
+              return score;
+            };
+            const ranked = candidates.map(el => ({el, score: scoreOf(el)}))
+              .filter(x => x.score > 0)
+              .sort((a,b) => b.score - a.score);
+            if (!ranked.length) return {ok:false, reason:'no_candidate'};
+            const target = ranked[0].el;
+            const label = String(target.innerText || target.textContent || target.value || target.getAttribute('aria-label') || '').trim().slice(0, 80);
+            try { target.scrollIntoView({block:'center', inline:'nearest'}); } catch (e) {}
+            try {
+              target.focus();
+              target.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, cancelable:true, view:window}));
+              target.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, cancelable:true, view:window}));
+              target.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, cancelable:true, view:window}));
+              target.click();
+            } catch (e) {
+              try { target.click(); } catch (e2) { return {ok:false, reason:String(e2||e).slice(0,120)}; }
+            }
+            // 部分表单按钮是 submit+value=resend，click 即可；若在 form 内也可 requestSubmit
+            try {
+              const form = target.closest('form');
+              if (form && target.tagName === 'BUTTON' && String(target.getAttribute('value')||'').toLowerCase() === 'resend') {
+                // 已 click，不必二次 submit，避免双发
+              }
+            } catch (e) {}
+            return {ok:true, text: label, score: ranked[0].score, value: String(target.getAttribute('value')||'')};
+            """)
+            if isinstance(clicked, dict) and clicked.get("ok"):
+                text = str(clicked.get("text") or clicked.get("value") or "resend").strip()
+                logger.info("%s[OTP] 已点击重新发送验证码按钮：%s", _log_prefix(driver), text or "-")
+                time.sleep(1.5)
+                return {"ok": True, "text": text, "via": "js"}
+
+            # 回退：返回元素再点（兼容旧 Roxy Selenium）
             btn = driver.execute_script(r"""
             const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
             const enabled = el => !el.disabled && String(el.getAttribute('aria-disabled') || '').toLowerCase() !== 'true';
             const candidates = [...document.querySelectorAll('button,a,[role=button],[role=link],input[type=button],input[type=submit]')].filter(visible);
             const attrHit = candidates.find(el => {
               if (!enabled(el)) return false;
-              const attrs = [el.id, el.getAttribute('name'), el.getAttribute('value'), el.getAttribute('data-dd-action-name'), el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid')]
-                .join(' ').toLowerCase();
-              const name = String(el.getAttribute('name') || '').toLowerCase();
               const value = String(el.getAttribute('value') || '').toLowerCase();
+              const name = String(el.getAttribute('name') || '').toLowerCase();
+              if (value === 'resend') return true;
               if (name === 'intent' && value === 'resend') return true;
-              return /resend|send.*new|new.*code|again/.test(attrs);
+              const attrs = [el.id, name, value, el.getAttribute('data-dd-action-name'), el.getAttribute('aria-label'), el.getAttribute('title'), el.getAttribute('data-testid')]
+                .join(' ').toLowerCase();
+              return /resend|send.*new|new.*code|again|erneut/.test(attrs);
             });
             if (attrHit) return attrHit;
-            // 兜底：多语言文本，避免因页面没有稳定属性时卡死。
-            return candidates.find(el => enabled(el) && /resend|send\s+(?:a\s+)?new\s+code|send\s+again|重新发送|重新发送电子邮件|重发|再次发送|再送信|新しい|届かない/.test((el.innerText || el.textContent || '').toLowerCase())) || null;
+            return candidates.find(el => enabled(el) && /resend|send\s+(?:a\s+)?new\s+code|send\s+again|erneut\s+senden|重新发送|重新发送电子邮件|重发|再次发送|再送信|新しい|届かない/.test((el.innerText || el.textContent || '').toLowerCase())) || null;
             """)
             if btn:
-                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
                 time.sleep(0.4)
-                text = str(btn.text or btn.get_attribute('value') or btn.get_attribute('data-dd-action-name') or '').strip()
+                text = _element_visible_text(btn)
                 btn.click()
-                logger.info("%s[OTP] 已点击重新发送验证码按钮：%s", _log_prefix(driver), text or '-')
+                logger.info("%s[OTP] 已点击重新发送验证码按钮：%s", _log_prefix(driver), text or "-")
                 time.sleep(1.5)
-                return {"ok": True, "text": text}
+                return {"ok": True, "text": text, "via": "element"}
+            last = clicked if clicked is not None else "no_button"
         except Exception as exc:
-            last = exc
+            last = f"{type(exc).__name__}: {exc}"
         time.sleep(0.5)
     raise RuntimeError(f"找不到可点击的重新发送验证码按钮: last={last}, state={_email_otp_page_state(driver)}")
 
@@ -1511,9 +1729,17 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
         logger.info("[Roxy注册] 已拿到 accessToken：%s", email)
         _check_manual_stop()
 
-        if _twofa_cfg.ENABLE_2FA:
-            logger.warning("[Roxy注册] 当前 Roxy 自动化路径暂不执行 2FA 设置，已跳过")
         totp_secret = None
+        if _twofa_cfg.ENABLE_2FA:
+            logger.info("[Roxy注册][2FA] ENABLE_2FA=True，准备设置 2FA：%s", email)
+            try:
+                from core.session import BrowserSession
+                from core.account_export import maybe_setup_2fa
+                twofa_session = BrowserSession(proxy=(proxy or "").strip(), detect_exit_geo=False)
+                totp_secret = maybe_setup_2fa(twofa_session, email, driver=driver)
+            except Exception as exc:
+                logger.warning("[Roxy注册][2FA] 会话创建失败（不影响账号保存）: %s: %s", type(exc).__name__, str(exc)[:200])
+                totp_secret = None
 
         codex_result = {
             "status": "skipped",
@@ -1557,15 +1783,20 @@ def run_roxy_registration(email: str, name: str, birthday: str, proxy: str = Non
                 "codex": codex_result,
             },
         )
-        codex_ok = codex_result.get("ok") or codex_result.get("status") == "skipped"
+        # 注册主流程与 Codex 解耦：拿到 accessToken 即成功；Codex 可补跑。
+        codex_ok = bool(codex_result.get("ok") or codex_result.get("status") in ("skipped", "success"))
+        codex_note = None if codex_ok else f"Codex 未完成(账号已注册可补跑): {codex_result.get('message')}"
+        if codex_note:
+            logger.warning("[Roxy注册] %s", codex_note)
         return {
-            "success": bool(codex_ok),
+            "success": True,
             "email": email,
             "account_id": account_id,
             "access_token": access_token,
             "totp_secret": totp_secret,
             "codex": codex_result,
-            "error": None if codex_ok else f"Codex 未完成: {codex_result.get('message')}",
+            "error": codex_note,
+            "warning": codex_note,
         }
     except Exception as exc:
         logger.error("[Roxy注册] 失败：%s: %s", type(exc).__name__, exc)

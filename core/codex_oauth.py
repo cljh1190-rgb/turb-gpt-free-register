@@ -534,10 +534,55 @@ def _extract_state_from_auth_url(auth_url: str) -> str:
         return ""
 
 
-def _request_cpa_authorize_url() -> dict:
-    """从 CPA 生成 Codex OAuth 授权地址；本地不生成 PKCE。"""
+def _is_cpa_unreachable_error(exc: Exception) -> bool:
+    """CPA 本机未开 / 端口不可达 / 连接超时，可回退本地 PKCE。"""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        key in text
+        for key in (
+            "failed to connect",
+            "connection refused",
+            "could not connect",
+            "connection timed out",
+            "timed out",
+            "curl: (7)",
+            "curl: (28)",
+            "10061",  # WinError connection refused
+            "winerror 10061",
+            "actively refused",
+        )
+    )
+
+
+def _request_local_authorize_url() -> dict:
+    """本地生成 PKCE + 授权地址（不依赖 CPA 进程）。"""
+    code_verifier, code_challenge = _generate_pkce()
+    state = _generate_state()
+    auth_url = _build_authorize_url(state, code_challenge, prompt="login")
+    logger.info("[Codex][local] 已生成本地 PKCE 授权地址，state=%s...", state[:12])
+    return {
+        "auth_url": auth_url,
+        "state": state,
+        "code_verifier": code_verifier,
+        "code_challenge": code_challenge,
+        "origin": "local",
+        "raw": {"source": "local_pkce"},
+    }
+
+
+def _request_cpa_authorize_url(*, allow_local_fallback: bool = True) -> dict:
+    """从 CPA 生成 Codex OAuth 授权地址；CPA 不可达时可选回退本地 PKCE。"""
     logger.info("[Codex][CPA] 正在通过 CPA 管理接口生成授权地址...")
-    payload = _cpa_request_json("GET", "/v0/management/codex-auth-url")
+    try:
+        payload = _cpa_request_json("GET", "/v0/management/codex-auth-url")
+    except Exception as exc:
+        if allow_local_fallback and _is_cpa_unreachable_error(exc):
+            logger.warning(
+                "[Codex][CPA] 管理接口不可达（%s），自动回退本地 PKCE 授权，不依赖 8317",
+                f"{type(exc).__name__}: {str(exc)[:160]}",
+            )
+            return _request_local_authorize_url()
+        raise
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     auth_url = _first_non_empty(
         payload.get("url"),
@@ -686,7 +731,7 @@ def _decode_jwt_segment(seg: str) -> dict:
 def _post_json(session: BrowserSession, url: str, payload: dict, referer: str,
                sentinel_header: str | None = None, so_header: str | None = None):
     """统一发 /api/accounts/* 的 JSON POST。"""
-    headers = session.get_auth_headers(referer=referer)
+    headers = session.get_auth_headers(referer=referer, method="POST")
     if sentinel_header:
         headers["openai-sentinel-token"] = sentinel_header
     if so_header:

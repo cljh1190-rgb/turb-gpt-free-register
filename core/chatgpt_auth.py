@@ -5,7 +5,7 @@ ChatGPT Auth 模块
 """
 import json
 import logging
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from core.session import BrowserSession
 from config import (
@@ -29,7 +29,13 @@ def _ensure_authorize_context(authorize_url: str, session: BrowserSession, email
         parsed = urlparse(authorize_url)
         if not parsed.netloc.endswith("auth.openai.com"):
             return authorize_url
-        params = parse_qs(parsed.query, keep_blank_values=True)
+        # Do not rebuild the complete query string here.  OAuth state values are
+        # opaque bytes from the provider and may contain ``+``, percent escapes,
+        # duplicate keys, or ordering that must survive the redirect unchanged.
+        # Re-encoding a parsed query can turn ``+`` into a space and invalidate
+        # the server-side transaction, producing ``invalid_state`` later.
+        existing = parse_qsl(parsed.query, keep_blank_values=True)
+        existing_keys = {key for key, _ in existing}
         required = {
             "ext-oai-did": session.device_id,
             "auth_session_logging_id": session.auth_session_logging_id,
@@ -38,14 +44,16 @@ def _ensure_authorize_context(authorize_url: str, session: BrowserSession, email
             "login_hint": email,
             "ccaps": _CC_CAPS,
         }
-        changed = False
-        for key, value in required.items():
-            if not params.get(key):
-                params[key] = [value]
-                changed = True
-        if not changed:
+        missing = [
+            (key, value)
+            for key, value in required.items()
+            if key not in existing_keys
+        ]
+        if not missing:
             return authorize_url
-        return parsed._replace(query=urlencode(params, doseq=True)).geturl()
+        suffix = urlencode(missing, doseq=True)
+        query = f"{parsed.query}&{suffix}" if parsed.query else suffix
+        return parsed._replace(query=query).geturl()
     except Exception:
         return authorize_url
 

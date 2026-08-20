@@ -90,8 +90,23 @@ def generate_fingerprint_data(device_id: str, attempt: int = 1, elapsed_ms: floa
 
     # 模拟 performance.now() 与 performance.timeOrigin，保持
     # timeOrigin + now ≈ Date.now()，避免同一 p 数组内时间自相矛盾。
-    perf_now = random.uniform(1000, 8000)
-    time_origin = time.time() * 1000 - perf_now
+    # SENTINEL_MONOTONIC_PERF 开启时，同一会话（browser_profile）内 p[13]
+    # 单调递增、p[17] timeOrigin 稳定，模拟页面存活期间的性能时钟；
+    # 否则每次请求独立随机（旧行为，会出现时钟倒退的内部矛盾）。
+    monotonic = True
+    try:
+        from config import openai_protocol as _protocol_cfg
+        monotonic = bool(getattr(_protocol_cfg, "SENTINEL_MONOTONIC_PERF", True))
+    except Exception:
+        monotonic = True
+    if monotonic and profile.get("perf_time_origin_ms"):
+        time_origin = float(profile["perf_time_origin_ms"])
+        perf_now = float(profile.get("perf_last_now_ms") or 0)
+        perf_now += random.uniform(20, 180)
+        profile["perf_last_now_ms"] = perf_now
+    else:
+        perf_now = random.uniform(1000, 8000)
+        time_origin = time.time() * 1000 - perf_now
 
     # 生成 sid（SDK内部的会话ID）
     sid = str(device_id)

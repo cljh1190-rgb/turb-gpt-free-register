@@ -10,7 +10,7 @@
 """
 from config.env_loader import apply_env_overrides
 
-ENABLE_2FA = False
+ENABLE_2FA = True
 
 # ---- .env overrides for WebUI editable fields ----
 apply_env_overrides(globals(), {'ENABLE_2FA': 'bool'})

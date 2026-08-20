@@ -64,6 +64,11 @@ from config.browser import (
     validate_browser_profile,
     BROWSER_PROFILE_POOL,
     pick_browser_profile,
+    pick_tls_bundle,
+    impersonate_for_profile,
+    TLS_IMPRESONATE_POOL,
+    TLS_IMPRESONATE_ROTATION,
+    SEND_CONTENT_TYPE_ON_GET,
     IMPERSONATE,
     REQUEST_TIMEOUT,
 )
@@ -94,6 +99,8 @@ from config.proxy import (
     PROXY_POOL,
     PLAN_CHECK_PROXY_MODE,
     PLAN_CHECK_PROXY,
+    PLAN_CHECK_THORDATA_COUNTRY,
+    PLAN_CHECK_THORDATA_NUMBER,
     PLAN_CHECK_TIMEOUT,
     PLAN_CHECK_MAX_ATTEMPTS,
     PLAN_CHECK_RETRY_DELAY,
@@ -154,6 +161,16 @@ from config.email import (
 # ---------- 2FA ----------
 from config.twofa import ENABLE_2FA
 
+# ---------- 号池 ----------
+from config.pool import (
+    POOL_ENABLED,
+    POOL_QUOTA_THRESHOLD_PERCENT,
+    POOL_ALLOW_UNKNOWN_QUOTA,
+    POOL_PROBE_INTERVAL_SECONDS,
+    POOL_PROBE_STALE_SECONDS,
+    POOL_ACQUIRE_STRATEGY,
+)
+
 
 # ---------- 热加载支持 ----------
 # WebUI 改配置后调 reload_all() 即可让所有运行时代码看到新值，无需重启进程。
@@ -174,10 +191,12 @@ _RELOADABLE_SUBMODULES = (
     "config.browser_use",
     "config.skyvern",
     "config.flow_trigger",
+    "config.billing_handoff",
     "config.codex",
     "config.extract_link",
     "config.sub2api",
     "config.humanize",
+    "config.pool",
 )
 
 
@@ -207,9 +226,9 @@ def reload_all() -> list[str]:
 def _refresh_top_level_constants() -> None:
     """把刚 reload 的子模块的常量重新拷一份到 config 包顶层。"""
     import config as _self
-    from config import browser, openai_protocol, proxy as _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger
+    from config import browser, openai_protocol, proxy as _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger, billing_handoff, pool
     # 简单粗暴：枚举一遍重要常量，覆盖到 _self
-    for src in (browser, openai_protocol, _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger):
+    for src in (browser, openai_protocol, _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger, billing_handoff, pool):
         for k in dir(src):
             if k.isupper() or k in ("pick_proxy", "pick_browser_profile", "build_browser_environment", "validate_browser_profile"):
                 setattr(_self, k, getattr(src, k))
@@ -230,6 +249,8 @@ __all__ = [
     "NAVIGATOR_PROTO_SAMPLES", "DOCUMENT_KEY_SAMPLES", "WINDOW_KEY_SAMPLES", "WINDOW_FEATURE_FLAGS",
     "build_browser_environment", "validate_browser_profile",
     "BROWSER_PROFILE_POOL", "pick_browser_profile",
+    "pick_tls_bundle", "impersonate_for_profile",
+    "TLS_IMPRESONATE_POOL", "TLS_IMPRESONATE_ROTATION", "SEND_CONTENT_TYPE_ON_GET",
     "IMPERSONATE", "REQUEST_TIMEOUT",
     # openai_protocol
     "OPENAI_CLIENT_ID", "OPENAI_SCOPE", "OPENAI_AUDIENCE", "OPENAI_REDIRECT_URI",
@@ -238,6 +259,7 @@ __all__ = [
     "SEND_SENTINEL_ON_EMAIL_OTP_VALIDATE", "CHATGPT_ANON_BOOTSTRAP_ENABLED", "CHATGPT_AUTH_BOOTSTRAP_ENABLED", "CHATGPT_BOOTSTRAP_STRICT",
     # proxy
     "PROXY_POOL", "PLAN_CHECK_PROXY_MODE", "PLAN_CHECK_PROXY",
+    "PLAN_CHECK_THORDATA_COUNTRY", "PLAN_CHECK_THORDATA_NUMBER",
     "PLAN_CHECK_TIMEOUT", "PLAN_CHECK_MAX_ATTEMPTS", "PLAN_CHECK_RETRY_DELAY",
     "PLAN_CHECK_REGISTRATION_RECHECK_DELAY", "PLAN_CHECK_WORKERS", "PLAN_CHECK_QUEUE_LIMIT",
     "PLAN_CHECK_MIN_INTERVAL", "PLAN_CHECK_JITTER", "pick_proxy", "PROXY",
@@ -258,4 +280,7 @@ __all__ = [
     "CLOUDMAIL_AUTO_ADD_USER", "CLOUDMAIL_RANDOM_LOCAL_LENGTH",
     # twofa
     "ENABLE_2FA",
+    # pool
+    "POOL_ENABLED", "POOL_QUOTA_THRESHOLD_PERCENT", "POOL_ALLOW_UNKNOWN_QUOTA",
+    "POOL_PROBE_INTERVAL_SECONDS", "POOL_PROBE_STALE_SECONDS", "POOL_ACQUIRE_STRATEGY",
 ]

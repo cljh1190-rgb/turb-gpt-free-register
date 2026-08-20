@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from typing import Iterable
 
 from core.session import BrowserSession
@@ -21,8 +22,36 @@ _API_BASE = "https://chatgpt.com/backend-api"
 
 
 def _json_post(session: BrowserSession, url: str, payload: dict, referer: str, headers: dict | None = None):
-    h = headers or session.get_chatgpt_headers(referer=referer)
+    h = dict(headers or session.get_chatgpt_headers(referer=referer, method="POST"))
+    # 调用方可能传入了用于 GET 的头（默认不带 content-type），JSON POST 必须补齐。
+    if not any(str(k).lower() == "content-type" for k in h):
+        h["content-type"] = "application/json"
     return session.post(url, headers=h, data=json.dumps(payload, separators=(",", ":")))
+
+
+def _optional_get_urls(base: str, modes: Iterable[str]) -> list[str]:
+    """bootstrap 里可选的前端预热 GET（model picker 相关），真实首屏会随机并发加载。"""
+    urls = _system_hint_paths(modes, base)
+    urls.append(f"{base}/models?iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true")
+    return urls
+
+
+def _shuffle_optional(urls: list[str]) -> list[str]:
+    try:
+        from config import openai_protocol as _p
+        if bool(getattr(_p, "BOOTSTRAP_SHUFFLE_OPTIONAL", True)):
+            random.shuffle(urls)
+    except Exception:
+        pass
+    return urls
+
+
+def _skip_optional_probability() -> float:
+    try:
+        from config import openai_protocol as _p
+        return max(0.0, min(1.0, float(getattr(_p, "BOOTSTRAP_OPTIONAL_SKIP_PROBABILITY", 0.15) or 0.0)))
+    except Exception:
+        return 0.15
 
 
 def _safe_request(label: str, fn, *, strict: bool = False):
@@ -98,10 +127,10 @@ def anonymous_bootstrap(session: BrowserSession, *, strict: bool = False) -> Non
     ), strict=strict)
     _safe_request("anon me", lambda: session.get(f"{_ANON_BASE}/me", headers=session.get_chatgpt_headers(referer=referer)), strict=strict)
     prep = _chat_requirements_prepare(session, _ANON_BASE, referer, strict=strict)
-    for url in [
-        *_system_hint_paths(("custom_agents", "connectors", "basic"), _ANON_BASE),
-        f"{_ANON_BASE}/models?iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true",
-    ]:
+    for url in _shuffle_optional(_optional_get_urls(_ANON_BASE, ("custom_agents", "connectors", "basic"))):
+        if random.random() < _skip_optional_probability():
+            logger.debug("[Bootstrap] 跳过可选预热: %s", url)
+            continue
         _safe_request(url, lambda u=url: session.get(u, headers=session.get_chatgpt_headers(referer=referer)), strict=strict)
     _safe_request("anon conversation/init", lambda: _json_post(session, f"{_ANON_BASE}/conversation/init", {
         "requested_default_model": None,
@@ -134,10 +163,10 @@ def authenticated_bootstrap(session: BrowserSession, access_token: str | None = 
     ]:
         _safe_request(f"auth {path}", lambda p=path: session.get(f"{_API_BASE}{p}", headers=headers()), strict=strict)
     prep = _chat_requirements_prepare(session, _API_BASE, referer, strict=strict)
-    for url in [
-        *_system_hint_paths(("custom_agents", "connectors", "basic"), _API_BASE),
-        f"{_API_BASE}/models?iim=false&is_gizmo=false&supports_model_picker_upgrade_presets=true",
-    ]:
+    for url in _shuffle_optional(_optional_get_urls(_API_BASE, ("custom_agents", "connectors", "basic"))):
+        if random.random() < _skip_optional_probability():
+            logger.debug("[Bootstrap] 跳过可选预热: %s", url)
+            continue
         _safe_request(url, lambda u=url: session.get(u, headers=headers()), strict=strict)
     _safe_request("auth conversation/init", lambda: _json_post(session, f"{_API_BASE}/conversation/init", {
         "requested_default_model": None,

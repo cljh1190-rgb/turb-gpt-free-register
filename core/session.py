@@ -4,6 +4,7 @@ curl_cffi Session 封装
 统一管理 Cookie、请求头和 TLS 指纹
 """
 import logging
+import copy
 import random
 import threading
 import time
@@ -17,6 +18,7 @@ from config import (
     SEC_CH_UA_BITNESS, SEC_CH_UA_MODEL, SEND_HIGH_ENTROPY_CLIENT_HINTS,
     ACCEPT_LANGUAGE, IMPERSONATE, OAI_CLIENT_BUILD_NUMBER, OAI_CLIENT_VERSION,
     REQUEST_TIMEOUT, pick_proxy, pick_browser_profile, validate_browser_profile,
+    pick_tls_bundle, impersonate_for_profile,
 )
 
 
@@ -32,7 +34,14 @@ class BrowserSession:
     使用 curl_cffi 的 impersonate 功能绕过 Cloudflare TLS 指纹检测。
     """
 
-    def __init__(self, proxy: str = None, *, detect_exit_geo: bool = True):
+    def __init__(
+        self,
+        proxy: str = None,
+        *,
+        detect_exit_geo: bool = True,
+        device_id: str | None = None,
+        browser_profile: dict | None = None,
+    ):
         """
         初始化会话。
 
@@ -42,17 +51,39 @@ class BrowserSession:
                    显式传 "" 表示禁用代理。
             detect_exit_geo: 是否探测出口 IP 并自动选择语言/时区画像。
                              套餐查询等短请求可关闭，避免额外网络等待。
+            device_id: 复用已有 oai-did；不传时为新会话生成 UUID。
+            browser_profile: 复用注册时保存的浏览器画像；不传时按出口自动生成。
         """
         # proxy=None  → 从池里随机抽（默认行为）
         # proxy=""    → 禁用代理（直连）
         # proxy="..." → 使用指定代理
-        if proxy is None:
+        try:
+            from config import proxy as proxy_cfg
+            required_proxy = bool(proxy_cfg.proxy_required())
+        except Exception:
+            proxy_cfg = None
+            required_proxy = False
+        normalized_supplied_proxy = (
+            proxy_cfg.normalize_proxy_url(proxy)
+            if proxy_cfg is not None and proxy is not None
+            else None
+        )
+        supplied_proxy_allowed = bool(
+            proxy_cfg.proxy_allowed(normalized_supplied_proxy)
+            if proxy_cfg is not None and normalized_supplied_proxy
+            else False
+        )
+        if proxy is None or (required_proxy and not supplied_proxy_allowed):
             self.proxy = pick_proxy()
         else:
-            self.proxy = proxy
+            self.proxy = normalized_supplied_proxy or proxy
+        if proxy_cfg is not None and self.proxy:
+            self.proxy = proxy_cfg.ensure_cliproxy_session(self.proxy) or self.proxy
+        if required_proxy and not str(self.proxy or "").strip():
+            raise RuntimeError("ThorData 代理为强制模式，禁止使用本机直连 IP")
 
         # 生成设备ID（oai-did），整个注册流程复用
-        self.device_id = str(uuid.uuid4())
+        self.device_id = str(device_id or uuid.uuid4())
 
         # 生成 auth_session_logging_id
         self.auth_session_logging_id = str(uuid.uuid4())
@@ -73,8 +104,26 @@ class BrowserSession:
         self.react_container_key = "__reactContainer$" + uuid.uuid4().hex[:11]
         self.react_resources_key = "__reactResources$" + self.react_container_key.split("$", 1)[1]
 
+        # TLS 指纹目标：复用已保存画像时按画像 chrome_major 推导 impersonate，
+        # 保证 TLS 与 UA/sec-ch-ua 版本一致；全新会话则按池随机抽取做轮换。
+        supplied_profile = copy.deepcopy(browser_profile) if isinstance(browser_profile, dict) and browser_profile else None
+        if supplied_profile is not None:
+            self.tls_bundle = None
+            self.impersonate_target = impersonate_for_profile(supplied_profile)
+        else:
+            self.tls_bundle = pick_tls_bundle()
+            self.impersonate_target = (
+                str(self.tls_bundle.get("impersonate"))
+                if self.tls_bundle else IMPERSONATE
+            )
+
         # 创建 curl_cffi 会话
-        self.session = Session(impersonate=IMPERSONATE)
+        session_kwargs = {"impersonate": self.impersonate_target}
+        if proxy_cfg is not None:
+            curl_options = proxy_cfg.proxy_curl_options(self.proxy)
+            if curl_options:
+                session_kwargs["curl_options"] = curl_options
+        self.session = Session(**session_kwargs)
 
         # 设置代理
         if self.proxy:
@@ -86,18 +135,30 @@ class BrowserSession:
         # 设置超时
         self.session.timeout = REQUEST_TIMEOUT
 
-        # 会话级熔断：收到 403/429 后停止继续打后续接口，避免异常状态下扩大误伤。
+        # 会话级熔断只处理明确的限流响应。Cloudflare 对协议导航返回 403
+        # 不代表同会话的 NextAuth/Auth API 不可用，不能据此冻结整个会话。
         self.blocked_until = 0.0
         self.blocked_reason = ""
 
         # 先用当前代理检测出口 IP 地理信息，再为本会话挑一份稳定浏览器画像。
         # 这样 Accept-Language / navigator.language / timezone 可自动跟随出口地区。
-        self.exit_geo = self._detect_exit_geo() if detect_exit_geo else {}
+        self.exit_geo = (
+            dict(supplied_profile.get("geo") or {})
+            if supplied_profile is not None
+            else (self._detect_exit_geo() if detect_exit_geo else {})
+        )
         self._enforce_proxy_quality()
-        self.browser_profile = pick_browser_profile(self.exit_geo)
+        self.browser_profile = supplied_profile or pick_browser_profile(self.exit_geo, tls_bundle=self.tls_bundle)
+        self.browser_profile["impersonate"] = self.impersonate_target
         self.browser_profile["react_listening_key"] = self.react_listening_key
         self.browser_profile["react_container_key"] = self.react_container_key
         self.browser_profile["react_resources_key"] = self.react_resources_key
+        # 性能时钟：模拟页面存活期间的 performance.now()，让同一会话内
+        # sentinel p[13] 单调递增、p[17] timeOrigin 稳定，避免每次请求
+        # 都重新随机造成“性能时钟倒退/时间原点漂移”的内部矛盾。
+        _now_ms = time.time() * 1000
+        self.browser_profile["perf_time_origin_ms"] = round(_now_ms - random.uniform(800, 5000), 1)
+        self.browser_profile["perf_last_now_ms"] = random.uniform(600, 3000)
         issues = validate_browser_profile(self.browser_profile)
         if issues:
             logger.warning("[指纹] 浏览器画像存在不一致: %s", "; ".join(issues))
@@ -252,11 +313,11 @@ class BrowserSession:
                 headers["sec-ch-ua-platform"] = str(profile.get("sec_ch_ua_platform") or SEC_CH_UA_PLATFORM)
             if SEND_HIGH_ENTROPY_CLIENT_HINTS:
                 headers.update({
-                    "sec-ch-ua-full-version-list": SEC_CH_UA_FULL_VERSION_LIST,
-                    "sec-ch-ua-platform-version": SEC_CH_UA_PLATFORM_VERSION,
-                    "sec-ch-ua-arch": SEC_CH_UA_ARCH,
-                    "sec-ch-ua-bitness": SEC_CH_UA_BITNESS,
-                    "sec-ch-ua-model": SEC_CH_UA_MODEL,
+                    "sec-ch-ua-full-version-list": str(profile.get("sec_ch_ua_full_version_list") or SEC_CH_UA_FULL_VERSION_LIST),
+                    "sec-ch-ua-platform-version": str(profile.get("sec_ch_ua_platform_version") or SEC_CH_UA_PLATFORM_VERSION),
+                    "sec-ch-ua-arch": str(profile.get("sec_ch_ua_arch") or SEC_CH_UA_ARCH),
+                    "sec-ch-ua-bitness": str(profile.get("sec_ch_ua_bitness") or SEC_CH_UA_BITNESS),
+                    "sec-ch-ua-model": str(profile.get("sec_ch_ua_model") or SEC_CH_UA_MODEL),
                 })
         return headers
 
@@ -325,21 +386,37 @@ class BrowserSession:
         self._attach_datadog_headers(headers)
         return headers
 
-    def get_nextauth_headers(self, referer: str = "https://chatgpt.com/") -> dict:
+    @staticmethod
+    def _include_content_type(method: str) -> bool:
+        """
+        真实浏览器对纯 GET（fetch/xhr）不会携带 Content-Type；历史上协议层
+        全量带 application/json，是明显自动化标记。默认 GET 不带；POST 必带。
+        SEND_CONTENT_TYPE_ON_GET=True 可恢复旧抓包形态。
+        """
+        if method and method.upper() != "GET":
+            return True
+        try:
+            from config import browser as _browser_cfg
+            return bool(getattr(_browser_cfg, "SEND_CONTENT_TYPE_ON_GET", False))
+        except Exception:
+            return False
+
+    def get_nextauth_headers(self, referer: str = "https://chatgpt.com/", *, method: str = "GET") -> dict:
         """NextAuth `/api/auth/*` 头；HAR 中不携带 oai-client-*。"""
         headers = self._get_common_headers()
         headers.update({
             "accept": "*/*",
-            "content-type": "application/json",
             "sec-fetch-site": "same-origin",
             "sec-fetch-mode": "cors",
             "sec-fetch-dest": "empty",
             "referer": referer,
             "priority": "u=1, i",
         })
+        if self._include_content_type(method):
+            headers["content-type"] = "application/json"
         return headers
 
-    def get_chatgpt_headers(self, referer: str = "https://chatgpt.com/login") -> dict:
+    def get_chatgpt_headers(self, referer: str = "https://chatgpt.com/login", *, method: str = "GET") -> dict:
         """
         获取 chatgpt.com 域名的请求头。
         用于步骤1-3。
@@ -347,16 +424,17 @@ class BrowserSession:
         headers = self._get_common_headers()
         headers.update({
             "accept": "*/*",
-            "content-type": "application/json",
             "sec-fetch-site": "same-origin",
             "sec-fetch-mode": "cors",
             "sec-fetch-dest": "empty",
             "referer": referer,
             "priority": "u=1, i",
         })
+        if self._include_content_type(method):
+            headers["content-type"] = "application/json"
         return self._attach_frontend_api_headers(headers)
 
-    def get_auth_headers(self, referer: str = "https://auth.openai.com/create-account/password") -> dict:
+    def get_auth_headers(self, referer: str = "https://auth.openai.com/create-account/password", *, method: str = "GET") -> dict:
         """
         获取 auth.openai.com 域名的请求头。
         用于步骤7、10、12。
@@ -364,7 +442,6 @@ class BrowserSession:
         headers = self._get_common_headers()
         headers.update({
             "accept": "application/json",
-            "content-type": "application/json",
             "sec-fetch-site": "same-origin",
             "sec-fetch-mode": "cors",
             "sec-fetch-dest": "empty",
@@ -372,6 +449,8 @@ class BrowserSession:
             "priority": "u=1, i",
             "origin": "https://auth.openai.com",
         })
+        if self._include_content_type(method):
+            headers["content-type"] = "application/json"
         return self._attach_auth_rum_headers(headers)
 
     def get_auth_navigate_headers(self, referer: str = "https://chatgpt.com/", user_initiated: bool = True, target_origin: str = "https://auth.openai.com") -> dict:
@@ -391,7 +470,8 @@ class BrowserSession:
         })
         if user_initiated:
             headers["sec-fetch-user"] = "?1"
-        return self._attach_datadog_headers(headers)
+        # 页面导航不会携带 RUM/Datadog 诊断头；这些头只用于后续 JSON/API 请求。
+        return headers
 
     def get_chatgpt_navigate_headers(self, referer: str = "https://chatgpt.com/", user_initiated: bool = True) -> dict:
         """获取 chatgpt.com 页面导航请求头，用于预热登录页 / 回到应用页。"""
@@ -407,7 +487,8 @@ class BrowserSession:
         })
         if user_initiated:
             headers["sec-fetch-user"] = "?1"
-        return self._attach_datadog_headers(headers)
+        # 页面导航不会携带 RUM/Datadog 诊断头；这些头只用于后续 JSON/API 请求。
+        return headers
 
     def get_sentinel_headers(self) -> dict:
         """
@@ -483,10 +564,10 @@ class BrowserSession:
     def _observe_response_for_circuit_breaker(self, resp, url: str):
         status = int(getattr(resp, "status_code", 0) or 0)
         self._observe_cf_cookie_changes(url)
-        if status not in (403, 429):
+        if status != 429:
             return resp
         retry_after = self._parse_retry_after(getattr(resp, "headers", {}).get("retry-after") if getattr(resp, "headers", None) else None)
-        cool_down = retry_after if retry_after > 0 else (300 if status == 429 else 900)
+        cool_down = retry_after if retry_after > 0 else 300
         self.blocked_until = max(self.blocked_until, time.time() + min(cool_down, 3600))
         self.blocked_reason = f"HTTP {status} from {url}"
         logger.warning("[熔断] 当前会话收到 HTTP %s，进入冷却 %ss，停止后续请求：%s", status, min(cool_down, 3600), url)
@@ -505,3 +586,10 @@ class BrowserSession:
         headers = self._attach_openai_target_headers_for_url(url, headers)
         resp = self.session.post(url, headers=headers, **kwargs)
         return self._observe_response_for_circuit_breaker(resp, url)
+
+    def close(self) -> None:
+        """释放底层 curl 会话，便于代理切换时销毁旧连接。"""
+        try:
+            self.session.close()
+        except Exception:
+            logger.debug("关闭 BrowserSession 底层连接失败", exc_info=True)

@@ -10,6 +10,7 @@ from config.env_loader import env_str, apply_env_overrides
 
 
 # 是否启用 Codex OAuth 授权（False = 跳过，不影响注册结果）
+# 默认关：注册先只落邮箱账号；接码/转 CPA 另开，避免烧短信费。
 ENABLE_CODEX: bool = False
 
 # Codex OAuth 客户端 ID（固定值，来自 CLIProxyAPI openai_auth.go:27 ClientID）
@@ -45,6 +46,7 @@ CODEX_REQUEST_TIMEOUT: int = 30
 # ============================================================
 
 # 注册成功后是否自动跑 Codex 授权（True=自动，False=跳过）
+# 默认关：能过就过，卡手机验证/接码先不管。
 ENABLE_CODEX_AUTO: bool = False
 
 # Codex OAuth 授权驱动：
@@ -91,25 +93,28 @@ CPA_SAVE_CALLBACK_RECEIPT: bool = True
 # ============================================================
 # 接码平台（手机短信验证用）
 # SMS_PROVIDER:
-#   "grizzly" = GrizzlySMS，接口说明见 https://api.grizzlysms.com
+#   "hero"    = HeroSMS，文档 https://hero-sms.com/cn/api （sms-activate 兼容）
+#   "grizzly" = GrizzlySMS，文档 https://grizzlysms.com/cn/docs （兼容 sms-activate）
 #   "l"       = 本地 L 取号服务，接口说明见 L_API.md
 #   "h"       = 本地 H 取号服务，接口说明见 H_API.md
 # ============================================================
 
-SMS_PROVIDER: str = "l"
+SMS_PROVIDER: str = "hero"
 
-# 接码 API 基址（GET handler）
-SMS_API_BASE: str = "https://api.grizzlysms.com/stubs/handler_api.php"
+# 接码 API 基址（GET handler_api.php）
+# Hero 默认：https://hero-sms.com/stubs/handler_api.php
+# Grizzly 默认：https://api.grizzlysms.com/stubs/handler_api.php
+SMS_API_BASE: str = "https://hero-sms.com/stubs/handler_api.php"
 
-# 接码 API 密钥（在 GrizzlySMS 后台 → 设置 获取）
+# 接码 API 密钥（Hero/Grizzly 后台获取，写入 .env 的 SMS_API_KEY）
 # 留空时 Codex 授权的手机验证步会失败；如不需要 Codex 自动授权，把 ENABLE_CODEX_AUTO=False。
 SMS_API_KEY: str = env_str("SMS_API_KEY", "")
 
-# 服务代码：OpenAI = "dr"
-SMS_SERVICE: str = "openai"
+# 服务代码（sms-activate 系）：OpenAI/ChatGPT 常用 "dr"（以各平台服务列表为准）
+SMS_SERVICE: str = "dr"
 
-# 国家代码：葡萄牙 = "117" / 美国 = "187"
-SMS_COUNTRY: str = "10"
+# 国家代码：美国=187 / 英国=16 等；也可 "any"（平台支持时）
+SMS_COUNTRY: str = "187"
 
 # 单个号愿意支付的最高价格（留空=不限）。透传给 getNumber 的 maxPrice。
 SMS_MAX_PRICE: str = ""
@@ -117,11 +122,12 @@ SMS_MAX_PRICE: str = ""
 # 一个号收不到短信/被拒时，换号重试的最大次数
 SMS_MAX_RETRIES: int = 10
 
-# 单个号等待短信的最长秒数（超时则取消该号换下一个）
-SMS_CODE_WAIT: int = 120
+# 单个号等待短信的最长秒数（超时则取消该号换下一个）。
+# 实践：20s 仍无码基本可判定号废/通道不行，继续死等 120s 只会拖慢 Codex。
+SMS_CODE_WAIT: int = 20
 
-# 轮询接码平台查短信的间隔（秒）
-SMS_POLL_INTERVAL: int = 5
+# 轮询接码平台查短信的间隔（秒）；配合短 SMS_CODE_WAIT 用 2s 更灵敏
+SMS_POLL_INTERVAL: int = 2
 
 # 接码平台 HTTP 请求超时（秒）
 SMS_REQUEST_TIMEOUT: int = 30
@@ -161,4 +167,4 @@ L_ADMIN_AUTH_CODE: str = env_str("L_ADMIN_AUTH_CODE", "")
 L_PHONE_PREFIX: str = ""
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'ENABLE_CODEX_AUTO': 'bool', 'CODEX_OAUTH_DRIVER': 'str', 'CODEX_AUTH_URL_SOURCE': 'str', 'CPA_MANAGEMENT_URL': 'str', 'CPA_MANAGEMENT_KEY': 'str', 'CPA_REQUEST_TIMEOUT': 'int', 'CPA_CALLBACK_SUBMIT_RETRIES': 'int', 'CPA_CALLBACK_SUBMIT_RETRY_DELAY': 'int', 'CPA_SAVE_CALLBACK_RECEIPT': 'bool', 'SMS_PROVIDER': 'str', 'SMS_COUNTRY': 'str', 'SMS_SERVICE': 'str', 'SMS_MAX_RETRIES': 'int', 'SMS_CODE_WAIT': 'int', 'SMS_API_KEY': 'str', 'H_API_BASE': 'str', 'H_ADMIN_AUTH_CODE': 'str', 'H_PHONE_PREFIX': 'str', 'H_PHONE_ACQUIRE_MODE': 'str', 'L_API_BASE': 'str', 'L_ADMIN_AUTH_CODE': 'str', 'L_PHONE_PREFIX': 'str'})
+apply_env_overrides(globals(), {'ENABLE_CODEX': 'bool', 'ENABLE_CODEX_AUTO': 'bool', 'CODEX_OAUTH_DRIVER': 'str', 'CODEX_AUTH_URL_SOURCE': 'str', 'CPA_MANAGEMENT_URL': 'str', 'CPA_MANAGEMENT_KEY': 'str', 'CPA_REQUEST_TIMEOUT': 'int', 'CPA_CALLBACK_SUBMIT_RETRIES': 'int', 'CPA_CALLBACK_SUBMIT_RETRY_DELAY': 'int', 'CPA_SAVE_CALLBACK_RECEIPT': 'bool', 'SMS_PROVIDER': 'str', 'SMS_API_BASE': 'str', 'SMS_COUNTRY': 'str', 'SMS_SERVICE': 'str', 'SMS_MAX_PRICE': 'str', 'SMS_MAX_RETRIES': 'int', 'SMS_CODE_WAIT': 'int', 'SMS_POLL_INTERVAL': 'int', 'SMS_API_KEY': 'str', 'H_API_BASE': 'str', 'H_ADMIN_AUTH_CODE': 'str', 'H_PHONE_PREFIX': 'str', 'H_PHONE_ACQUIRE_MODE': 'str', 'L_API_BASE': 'str', 'L_ADMIN_AUTH_CODE': 'str', 'L_PHONE_PREFIX': 'str'})

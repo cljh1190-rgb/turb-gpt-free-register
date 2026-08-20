@@ -83,7 +83,7 @@ ROXY_DEFAULT_OS_VERSION: str = ""
 # 创建 Roxy 环境时是否使用 config/proxy.py 的 PROXY_POOL：
 #   False = 不主动给 Roxy 环境设置代理
 #   True  = 每次创建环境时从 PROXY_POOL 随机取一个代理写入 proxyInfo
-ROXY_CREATE_USE_PROXY_POOL: bool = False
+ROXY_CREATE_USE_PROXY_POOL: bool = True
 
 # Roxy 代理检测通道；留空则不传 checkChannel。
 ROXY_PROXY_CHECK_CHANNEL: str = "IPRust.io"

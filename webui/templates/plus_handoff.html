@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Plus 结账助手</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f4f7fb; color: #172033; }
+    main { width: min(880px, calc(100% - 32px)); margin: 44px auto; }
+    .head { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 30px; letter-spacing: -.03em; }
+    .sub { margin: 7px 0 0; color: #667085; }
+    .back { color: #3056d3; text-decoration: none; font-weight: 650; }
+    .card { background: #fff; border: 1px solid #e4e9f2; border-radius: 16px; padding: 24px; box-shadow: 0 14px 40px rgba(20,35,70,.07); }
+    label { display: block; margin-bottom: 7px; color: #344054; font-size: 13px; font-weight: 700; }
+    select, input { width: 100%; height: 44px; border: 1px solid #cfd7e6; border-radius: 10px; padding: 0 12px; background: #fff; color: #172033; font: inherit; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    button { border: 0; border-radius: 10px; min-height: 42px; padding: 0 17px; font: inherit; font-weight: 700; cursor: pointer; background: #e9eef8; color: #24324a; }
+    button.primary { background: #3157d5; color: #fff; }
+    button.good { background: #087443; color: #fff; }
+    button:disabled { cursor: wait; opacity: .58; }
+    .notice { margin-top: 20px; padding: 14px 16px; border-radius: 11px; background: #f2f5fa; color: #475467; line-height: 1.6; }
+    .status { min-height: 24px; margin-top: 18px; color: #344054; font-weight: 650; }
+    .status.error { color: #b42318; }
+    .status.success { color: #087443; }
+    .short { margin-top: 16px; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .head { align-items: start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="head">
+    <div>
+      <h1>Plus 结账助手</h1>
+      <p class="sub">账号环境交接、本地短链接与订阅结果回查。</p>
+    </div>
+    <a class="back" href="/">返回控制台</a>
+  </div>
+
+  <section class="card">
+    <div class="grid">
+      <div>
+        <label for="account">选择已注册账号</label>
+        <select id="account"><option value="">正在加载账号</option></select>
+      </div>
+      <div>
+        <label for="plan">当前套餐</label>
+        <input id="plan" value="等待选择账号" readonly>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="open" class="primary" type="button">打开官方 Plus 页面</button>
+      <button id="extractLink" type="button">提取官方支付链接</button>
+      <button id="verify" class="good" type="button" disabled>我已确认支付，立即回查</button>
+    </div>
+
+    <div class="short" id="shortRow" hidden>
+      <input id="shortUrl" readonly>
+      <button id="copy" type="button">复制支付链接</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div class="notice">
+      卡号、有效期和 CVC 仅填写在 ChatGPT 官方 Stripe 页面。每次任务只提取一个 Checkout，不自动重复提交、不自动更换 IP；你确认后系统仅检测订阅是否生效。
+    </div>
+  </section>
+</main>
+
+<script>
+  const account = document.getElementById('account');
+  const plan = document.getElementById('plan');
+  const statusNode = document.getElementById('status');
+  const shortRow = document.getElementById('shortRow');
+  const shortUrl = document.getElementById('shortUrl');
+  let accounts = [];
+  let lockedAccountId = null;
+  let monitoring = false;
+
+  async function api(url, options = {}) {
+    const response = await fetch(url, {...options, credentials: 'same-origin'});
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
+    return payload;
+  }
+  function selected() { return accounts.find(item => String(item.id) === account.value); }
+  function setStatus(text, type = '') { statusNode.textContent = text; statusNode.className = `status ${type}`; }
+  function setBusy(button, busy) { button.disabled = busy; }
+
+  async function loadAccounts() {
+    const data = await api('/api/accounts?paged=1&page=1&page_size=500&archived=0');
+    accounts = data.items || [];
+    account.replaceChildren();
+    if (accounts.length) {
+      accounts.forEach(item => {
+        const option = document.createElement('option');
+        option.value = String(item.id);
+        option.textContent = item.email || `账号 #${item.id}`;
+        account.appendChild(option);
+      });
+    } else {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '暂无账号';
+      account.appendChild(option);
+    }
+    refreshPlan();
+  }
+  function refreshPlan() {
+    const item = selected();
+    plan.value = item ? (item.current_plan_type || item.plan_type || '尚未查询') : '等待选择账号';
+    shortRow.hidden = true;
+    lockedAccountId = null;
+    monitoring = false;
+    account.disabled = false;
+    document.getElementById('open').disabled = false;
+    document.getElementById('extractLink').disabled = false;
+    document.getElementById('verify').disabled = true;
+    setStatus('');
+  }
+  async function pollBrowser(id) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const value = await api(`/api/accounts/${id}/open-browser`);
+      if (value.status === 'ready') return value;
+      if (value.status === 'failed' || value.status === 'closed') throw new Error(value.error || value.message || '浏览器启动失败');
+    }
+    throw new Error('浏览器启动超时');
+  }
+  async function openBilling() {
+    const item = selected();
+    if (!item) return setStatus('请先选择账号', 'error');
+    const button = document.getElementById('open');
+    setBusy(button, true); setStatus('正在启动账号环境');
+    try {
+      await api(`/api/accounts/${item.id}/open-billing`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+      const result = await pollBrowser(item.id);
+      const warning = result.warning ? `；${result.warning}` : '';
+      setStatus(`${result.message || '官方 Plus 页面已打开'}${warning}`, 'success');
+    } catch (error) { setStatus(error.message, 'error'); }
+    finally { setBusy(button, false); }
+  }
+  async function extractPaymentLink() {
+    const item = selected();
+    if (!item) return setStatus('请先选择账号', 'error');
+    const button = document.getElementById('extractLink');
+    setBusy(button, true); setStatus('正在打开 Plus 方案并等待官方 Checkout 链接');
+    try {
+      await api(`/api/accounts/${item.id}/open-billing`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+      });
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const result = await api(`/api/accounts/${item.id}/billing-payment-link`);
+        if (result.payment_link) {
+          shortUrl.value = result.payment_link;
+          shortRow.hidden = false;
+          lockedAccountId = Number(item.id);
+          account.disabled = true;
+          document.getElementById('open').disabled = true;
+          button.disabled = true;
+          document.getElementById('verify').disabled = false;
+          setStatus('官方支付链接已提取。请在官方页面填写卡资料并由你本人确认一次。', 'success');
+          void monitorPaymentResult(item, true);
+          return;
+        }
+        if (result.status === 'failed' || result.status === 'closed') {
+          throw new Error(result.error || result.stage || 'Checkout 浏览器已关闭');
+        }
+        setStatus(result.stage || '等待登录并进入官方 Checkout');
+      }
+      throw new Error('等待官方支付链接超时');
+    } catch (error) { setStatus(error.message, 'error'); }
+    finally { if (!lockedAccountId) setBusy(button, false); }
+  }
+  async function monitorPaymentResult(item, automatic = false) {
+    if (monitoring) return;
+    monitoring = true;
+    const button = document.getElementById('verify');
+    setBusy(button, true);
+    if (!automatic) setStatus('正在检查官方账号订阅状态');
+    try {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const result = await api(`/api/accounts/${item.id}/billing-payment-link`);
+        if (result.payment_status === 'subscription_active') {
+          const value = result.detected_plan || 'paid';
+          plan.value = value;
+          setStatus(`订阅已生效：${value}`, 'success');
+          return;
+        }
+        if (result.status === 'failed' || result.status === 'closed') {
+          throw new Error(result.error || '支付浏览器已关闭');
+        }
+        if (!automatic) setStatus('尚未检测到订阅生效，继续等待官方状态更新');
+      }
+      setStatus('本次尚未检测到订阅生效；系统未重复提交支付。', '');
+    } catch (error) { setStatus(error.message, 'error'); }
+    finally { monitoring = false; setBusy(button, false); }
+  }
+  async function verifyPlan() {
+    const item = selected();
+    if (!item || Number(item.id) !== lockedAccountId) {
+      return setStatus('请先提取当前账号的官方支付链接', 'error');
+    }
+    return monitorPaymentResult(item, false);
+  }
+
+  account.addEventListener('change', refreshPlan);
+  document.getElementById('open').addEventListener('click', openBilling);
+  document.getElementById('extractLink').addEventListener('click', extractPaymentLink);
+  document.getElementById('verify').addEventListener('click', verifyPlan);
+  document.getElementById('copy').addEventListener('click', async () => {
+    await navigator.clipboard.writeText(shortUrl.value);
+    setStatus('支付链接已复制', 'success');
+  });
+  loadAccounts().catch(error => setStatus(error.message, 'error'));
+</script>
+</body>
+</html>

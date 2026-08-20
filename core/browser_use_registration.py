@@ -1851,9 +1851,17 @@ def run_browser_use_registration(
             create_acknowledged = True
             logger.info("[BrowserUse] 已拿到 accessToken：%s", email)
 
-            if _twofa_cfg.ENABLE_2FA:
-                logger.warning("[BrowserUse] 当前路径暂不自动设置 2FA，已跳过")
             totp_secret = None
+            if _twofa_cfg.ENABLE_2FA:
+                logger.info("[BrowserUse][2FA] ENABLE_2FA=True，准备设置 2FA：%s", email)
+                try:
+                    from core.session import BrowserSession
+                    from core.account_export import maybe_setup_2fa
+                    twofa_session = BrowserSession(proxy=(proxy or "").strip(), detect_exit_geo=False)
+                    totp_secret = maybe_setup_2fa(twofa_session, email, driver=page)
+                except Exception as exc:
+                    logger.warning("[BrowserUse][2FA] 会话创建失败（不影响账号保存）: %s: %s", type(exc).__name__, str(exc)[:200])
+                    totp_secret = None
 
             codex_result = {
                 "status": "skipped",

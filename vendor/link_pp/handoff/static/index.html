@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayPal 提链</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <!-- Toast 容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <div class="app">
+    <!-- 顶栏 -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="logo">PayPal 提链</h1>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" role="tab" data-tab="single" aria-selected="true">单任务</button>
+        <button class="tab" role="tab" data-tab="batch" aria-selected="false">批量</button>
+        <button class="tab" role="tab" data-tab="history" aria-selected="false">历史</button>
+      </nav>
+      <div class="header-right">
+        <div class="status-chip" id="statusChip" data-status="idle">
+          <span class="status-dot"></span>
+          <span id="statusText">待机</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tab 内容 -->
+    <main class="main">
+
+      <!-- ═══ 单任务 Tab ═══ -->
+      <section class="tab-panel active" id="panelSingle" role="tabpanel">
+        <div class="single-layout">
+          <!-- 配置区 -->
+          <div class="config-section">
+            <form id="singleForm" autocomplete="off" novalidate>
+              <!-- AT 输入 -->
+              <div class="card">
+                <div class="card-header">
+                  <h3>Access Token</h3>
+                  <span class="badge badge-muted">仅内存 · 不存储</span>
+                </div>
+                <div class="at-input-wrap">
+                  <input id="atInput" type="password" class="input input-lg" spellcheck="false" autocomplete="off" placeholder="粘贴 ChatGPT Access Token">
+                  <button class="btn btn-icon" id="atToggle" type="button" title="显示/隐藏"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+                <div class="at-profile" id="atProfile" hidden>
+                  <span class="at-email" id="atEmail"></span>
+                  <span class="at-name" id="atName"></span>
+                </div>
+              </div>
+
+              <!-- Checkout 链路 -->
+              <div class="card">
+                <div class="card-header">
+                  <h3>Checkout 链路</h3>
+                </div>
+                <div class="field-row">
+                  <div class="field flex-1">
+                    <label>代理出口国家</label>
+                    <div class="country-picker" id="ckPicker">
+                      <button type="button" class="picker-btn" id="ckPickerBtn">
+                        <span class="picker-label" id="ckPickerLabel">选择国家</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                      <input type="hidden" name="country" id="ckCode">
+                      <div class="picker-dropdown" id="ckDropdown" hidden>
+                        <input type="search" class="picker-search" id="ckSearch" placeholder="搜索国家、代码、货币..." autocomplete="off" spellcheck="false">
+                        <div class="picker-list" id="ckList"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field w-140">
+                    <label>代理协议</label>
+                    <select class="input" id="ckScheme" name="proxy_scheme">
+                      <option value="socks5">SOCKS5</option>
+                      <option value="socks5h">SOCKS5H</option>
+                      <option value="https">HTTPS</option>
+                      <option value="http">HTTP</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="country-detail" id="ckDetail" hidden>
+                  <span id="ckDetailText"></span>
+                </div>
+                <div class="field">
+                  <label>账单国家</label>
+                  <div class="country-picker" id="billingPicker">
+                    <button type="button" class="picker-btn" id="billingPickerBtn">
+                      <span class="picker-label" id="billingPickerLabel">选择国家</span>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                    <input type="hidden" name="billing_country" id="billingCode">
+                    <div class="picker-dropdown" id="billingDropdown" hidden>
+                      <input type="search" class="picker-search" id="billingSearch" placeholder="搜索账单国家、货币..." autocomplete="off" spellcheck="false">
+                      <div class="picker-list" id="billingList"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>代理列表</label>
+                  <textarea id="ckProxies" name="proxies" class="input textarea mono" rows="4" spellcheck="false" placeholder="每行一个，支持 URL / host:port:user:pass / host:port 格式"></textarea>
+                </div>
+                <div class="proxy-preview" id="ckProxyPreview" hidden>
+                  <table class="proxy-table">
+                    <thead><tr><th>#</th><th>未识别内容</th><th>原因</th></tr></thead>
+                    <tbody id="ckProxyBody"></tbody>
+                  </table>
+                </div>
+                <div class="field-meta"><span id="ckCount">0 条有效</span></div>
+              </div>
+
+              <!-- 运行参数 + 提交 -->
+              <div class="card">
+                <div class="field-row">
+                  <div class="field">
+                    <label>Checkout 次数</label>
+                    <input id="ckAttempts" name="checkout_attempts" type="number" class="input" min="1" value="5">
+                  </div>
+                  <div class="field">
+                    <label>提链/轮</label>
+                    <input id="pvAttempts" name="provider_attempts" type="number" class="input" min="1" value="10">
+                  </div>
+                </div>
+                <label class="check-option" for="stripeCheckout">
+                  <input id="stripeCheckout" name="stripe_checkout" type="checkbox">
+                  <span>Stripe 链提炼</span>
+                </label>
+                <div class="field stripe-engine-field">
+                  <label for="stripeEngine">Stripe 引擎</label>
+                  <select id="stripeEngine" name="stripe_engine" class="input" disabled>
+                    <option value="python">Python</option>
+                    <option value="go">Go</option>
+                  </select>
+                </div>
+                <div class="field stripe-engine-field">
+                  <label for="stripePromoStrategy">优惠策略</label>
+                  <select id="stripePromoStrategy" name="stripe_promo_strategy" class="input" disabled>
+                    <option value="upfront">前置优惠</option>
+                    <option value="post_update" selected>后置 update 优惠</option>
+                    <option value="mixed">混合优惠</option>
+                  </select>
+                </div>
+                <div class="action-row">
+                  <button class="btn btn-primary btn-lg" id="singleStartBtn" type="submit">开始提链</button>
+                  <button class="btn btn-danger" id="singleStopBtn" type="button" disabled>停止</button>
+                </div>
+                <p class="form-error" id="singleFormErr" hidden></p>
+              </div>
+            </form>
+          </div>
+
+          <!-- 结果 + 日志区 -->
+          <div class="output-section">
+            <!-- 结果卡 -->
+            <div class="card result-card" id="singleResultCard" hidden>
+              <div class="card-header">
+                <h3><span class="badge badge-success">成功</span> 提链结果</h3>
+              </div>
+              <div class="result-main">
+                <label>PayPal BA 链接</label>
+                <div class="result-url-row">
+                  <a id="rPaypal" class="result-url primary" href="#" target="_blank" rel="noopener"></a>
+                  <button class="btn btn-sm btn-copy" data-copy="rPaypal" type="button">复制</button>
+                </div>
+              </div>
+              <div class="result-grid">
+                <div class="result-item">
+                  <label>Provider Redirect</label>
+                  <div class="result-url-row">
+                    <a id="rProvider" class="result-url" href="#" target="_blank" rel="noopener"></a>
+                    <button class="btn btn-sm btn-copy" data-copy="rProvider" type="button">复制</button>
+                  </div>
+                </div>
+                <div class="result-item">
+                  <label>Checkout URL</label>
+                  <div class="result-url-row">
+                    <a id="rCheckout" class="result-url" href="#" target="_blank" rel="noopener"></a>
+                    <button class="btn btn-sm btn-copy" data-copy="rCheckout" type="button">复制</button>
+                  </div>
+                </div>
+              </div>
+              <div class="result-meta-row">
+                <div><label>BA Token</label><code id="rBaToken"></code></div>
+                <div><label>Session</label><code id="rSession"></code></div>
+                <div><label>链路</label><span id="rRoute"></span></div>
+              </div>
+            </div>
+
+            <!-- 日志面板 -->
+            <div class="card log-card">
+              <div class="card-header">
+                <h3>运行日志</h3>
+                <div class="log-controls">
+                  <div class="log-filters" id="logFilters">
+                    <button class="filter-btn active" data-level="all" type="button">全部</button>
+                    <button class="filter-btn" data-level="info" type="button">信息</button>
+                    <button class="filter-btn" data-level="warn" type="button">警告</button>
+                    <button class="filter-btn" data-level="error" type="button">错误</button>
+                  </div>
+                  <button class="btn btn-sm" id="clearLog" type="button">清空</button>
+                </div>
+              </div>
+              <div class="log-container" id="logContainer">
+                <div class="log-empty" id="logEmpty">等待任务开始</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ═══ 批量 Tab ═══ -->
+      <section class="tab-panel" id="panelBatch" role="tabpanel" hidden>
+        <div class="batch-layout">
+          <!-- 左: 配置 -->
+          <div class="batch-config">
+            <form id="batchForm" autocomplete="off" novalidate>
+              <div class="card">
+                <div class="card-header"><h3>批量 AT</h3></div>
+                <div class="field">
+                  <label>批次名称</label>
+                  <input id="batchName" type="text" class="input" maxlength="80" placeholder="可选，用于标识">
+                </div>
+                <div class="field">
+                  <label>AT 列表 <span class="field-hint" id="batchTokenCount">0 条</span></label>
+                  <textarea id="batchTokens" class="input textarea mono" rows="8" spellcheck="false" placeholder="每行一个 Access Token&#10;支持 # 注释行"></textarea>
+                </div>
+                <div class="at-batch-preview" id="atBatchPreview" hidden>
+                  <div class="at-batch-list" id="atBatchList"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><h3>代理与参数</h3><span class="badge badge-muted">同单任务配置</span></div>
+                <div class="field-row">
+                  <div class="field flex-1">
+                    <label>代理出口国家</label>
+                    <div class="country-picker" id="bCkPicker">
+                      <button type="button" class="picker-btn" id="bCkPickerBtn"><span class="picker-label" id="bCkPickerLabel">选择国家</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+                      <input type="hidden" name="country" id="bCkCode">
+                      <div class="picker-dropdown" id="bCkDropdown" hidden>
+                        <input type="search" class="picker-search" id="bCkSearch" placeholder="搜索..." autocomplete="off" spellcheck="false">
+                        <div class="picker-list" id="bCkList"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field w-140">
+                    <label>代理协议</label>
+                    <select class="input" id="bScheme" name="proxy_scheme">
+                      <option value="socks5">SOCKS5</option>
+                      <option value="socks5h">SOCKS5H</option>
+                      <option value="https">HTTPS</option>
+                      <option value="http">HTTP</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>账单国家</label>
+                  <div class="country-picker" id="bBillingPicker">
+                    <button type="button" class="picker-btn" id="bBillingPickerBtn"><span class="picker-label" id="bBillingPickerLabel">选择国家</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></button>
+                    <input type="hidden" name="billing_country" id="bBillingCode">
+                    <div class="picker-dropdown" id="bBillingDropdown" hidden>
+                      <input type="search" class="picker-search" id="bBillingSearch" placeholder="搜索账单国家、货币..." autocomplete="off" spellcheck="false">
+                      <div class="picker-list" id="bBillingList"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>代理列表</label>
+                  <textarea id="bCkProxies" name="proxies" class="input textarea mono" rows="4" spellcheck="false" placeholder="每行一个，支持 URL / host:port:user:pass / host:port 格式"></textarea>
+                </div>
+                <div class="field-row">
+                  <div class="field"><label>Checkout</label><input id="bCkAttempts" type="number" class="input" min="1" value="5"></div>
+                  <div class="field"><label>提链/轮</label><input id="bPvAttempts" type="number" class="input" min="1" value="10"></div>
+                  <div class="field"><label>并发</label><input id="bConcurrency" type="number" class="input" min="1" value="8"></div>
+                </div>
+                <label class="check-option" for="bStripeCheckout">
+                  <input id="bStripeCheckout" type="checkbox">
+                  <span>Stripe 链提炼</span>
+                </label>
+                <div class="field stripe-engine-field">
+                  <label for="bStripeEngine">Stripe 引擎</label>
+                  <select id="bStripeEngine" class="input" disabled>
+                    <option value="python">Python</option>
+                    <option value="go">Go</option>
+                  </select>
+                </div>
+                <div class="field stripe-engine-field">
+                  <label for="bStripePromoStrategy">优惠策略</label>
+                  <select id="bStripePromoStrategy" class="input" disabled>
+                    <option value="upfront">前置优惠</option>
+                    <option value="post_update" selected>后置 update 优惠</option>
+                    <option value="mixed">混合优惠</option>
+                  </select>
+                </div>
+                <div class="action-row">
+                  <button class="btn btn-primary btn-lg" id="batchStartBtn" type="submit">开始批量</button>
+                </div>
+                <p class="form-error" id="batchFormErr" hidden></p>
+              </div>
+            </form>
+          </div>
+
+          <!-- 右: 批次看板 -->
+          <div class="batch-dashboard">
+            <!-- 批次选择 -->
+            <div class="card batch-selector-card">
+              <div class="card-header">
+                <h3>批次</h3>
+                <div class="batch-actions">
+                  <select id="batchSel" class="input input-sm"><option value="">暂无批次</option></select>
+                  <button class="btn btn-sm" id="batchRefresh" type="button">刷新</button>
+                  <a class="btn btn-sm" id="batchDl" href="#" aria-disabled="true" download>导出CSV</a>
+                  <button class="btn btn-sm btn-danger-outline" id="batchCancel" type="button" disabled>停止</button>
+                  <button class="btn btn-sm" id="batchRetry" type="button" disabled>重试失败</button>
+                </div>
+              </div>
+              <!-- 进度条 -->
+              <div class="batch-progress" id="batchProgress" hidden>
+                <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="progress-text" id="progressText">0/0</div>
+              </div>
+              <!-- 统计 -->
+              <div class="batch-stats" id="batchStats" hidden>
+                <div class="stat"><span class="stat-value" id="sTotal">0</span><span class="stat-label">总数</span></div>
+                <div class="stat"><span class="stat-value stat-running" id="sRunning">0</span><span class="stat-label">运行</span></div>
+                <div class="stat"><span class="stat-value stat-success" id="sSuccess">0</span><span class="stat-label">成功</span></div>
+                <div class="stat"><span class="stat-value stat-failed" id="sFailed">0</span><span class="stat-label">失败</span></div>
+                <div class="stat"><span class="stat-value" id="sQueued">0</span><span class="stat-label">排队</span></div>
+              </div>
+            </div>
+
+            <!-- 账号列表 -->
+            <div class="card batch-jobs-card">
+              <div class="card-header">
+                <h3>账号</h3>
+                <select id="batchJobFilter" class="input input-sm input-mini">
+                  <option value="all">全部</option><option value="running">运行</option>
+                  <option value="success">成功</option><option value="failed">失败</option>
+                  <option value="cancelled">停止</option>
+                </select>
+              </div>
+              <div class="batch-job-list" id="batchJobList">
+                <div class="empty-state">提交批次后在此显示</div>
+              </div>
+            </div>
+
+            <!-- 选中任务日志 -->
+            <div class="card log-card batch-log-card">
+              <div class="card-header">
+                <h3 id="bjLabel">任务日志</h3>
+                <button class="btn btn-sm" id="bjRefresh" type="button" disabled>刷新</button>
+              </div>
+              <div class="log-container batch-log" id="bjLogContainer">
+                <div class="log-empty">选择账号查看日志</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ═══ 历史 Tab ═══ -->
+      <section class="tab-panel" id="panelHistory" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-header">
+            <h3>任务历史</h3>
+            <div class="history-controls">
+              <input type="search" id="historySearch" class="input input-sm" placeholder="搜索邮箱 / BA Token..." spellcheck="false">
+              <select id="historyStatusFilter" class="input input-sm input-mini">
+                <option value="all">全部状态</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+                <option value="cancelled">停止</option>
+              </select>
+              <button class="btn btn-sm" id="historyExport" type="button">导出 CSV</button>
+              <button class="btn btn-sm btn-danger-outline" id="historyClear" type="button">清空</button>
+            </div>
+          </div>
+          <div class="history-list" id="historyList">
+            <div class="empty-state">暂无历史记录</div>
+          </div>
+        </div>
+        <!-- 历史详情弹层 -->
+        <div class="history-detail-overlay" id="historyDetailOverlay" hidden>
+          <div class="history-detail-panel">
+            <div class="detail-header">
+              <h3 id="historyDetailTitle">任务详情</h3>
+              <button class="btn btn-icon" id="historyDetailClose" type="button">✕</button>
+            </div>
+            <div class="detail-body" id="historyDetailBody"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

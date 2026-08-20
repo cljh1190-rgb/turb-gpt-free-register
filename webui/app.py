@@ -11,19 +11,68 @@ Flask 本地控制台。
 默认绑定 127.0.0.1，仅本地访问。
 """
 import logging
+import json
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from urllib.parse import urlparse
 
-from flask import Flask, Response, jsonify, make_response, render_template, request
+from flask import Flask, Response, jsonify, make_response, redirect, render_template, request
 
-from core import codex_retry_service, db, plan_check_service, extract_link_service, codex_agent_service
+from core import codex_retry_service, db, plan_check_service, quota_check_service, extract_link_service, codex_agent_service, account_pool
+from core.account_import_parser import parse_account_import_text
+from core.account_archive_parser import AccountArchiveError, normalize_plus_archive
+from core.generic_api_mail_client import (
+    fetch_latest_otp_from_url,
+    mask_code_url,
+    parse_generic_api_line,
+    parse_otp_viewer_text,
+)
+from core.mail_archive_viewer import fetch_mail_archive, mask_mail_url, parse_mail_viewer_input
+from core.link_otp_login_service import (
+    clear_link_login_jobs,
+    enqueue_link_login_queries,
+    link_login_pause_state,
+    list_link_login_jobs,
+    pause_link_login_jobs,
+    resume_link_login_jobs,
+)
+from core.plus_check_import_service import import_and_enqueue_plus_accounts
 from webui.auth import init_auth, register_auth_routes
 from core import registration_service as svc
+from core import account_browser_service
 from webui import config_editor
 
 logger = logging.getLogger(__name__)
+
+
+def _account_plan_check_context(account: dict, *, fallback_proxy: str | None = None) -> dict:
+    """读取注册时保存的设备画像，供后续套餐查询保持同一环境。"""
+    extra: dict = {}
+    try:
+        raw_extra = account.get("extra_json")
+        if isinstance(raw_extra, dict):
+            extra = raw_extra
+        elif raw_extra:
+            parsed = json.loads(str(raw_extra))
+            extra = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        extra = {}
+    profile = extra.get("browser_profile") if isinstance(extra.get("browser_profile"), dict) else None
+    timezone_offset_min = "-"
+    if profile and profile.get("timezone_offset_minutes") is not None:
+        try:
+            timezone_offset_min = str(-int(profile.get("timezone_offset_minutes") or 0))
+        except (TypeError, ValueError):
+            timezone_offset_min = "-"
+    return {
+        "proxy": account.get("proxy_used") or fallback_proxy,
+        "timezone_offset_min": timezone_offset_min,
+        "device_id": account.get("device_id") or extra.get("device_id"),
+        "browser_profile": profile,
+    }
 
 def _pool_source_arg(default: str = "outlook") -> str:
     src = (request.args.get("source") or "").strip()
@@ -92,6 +141,8 @@ def _compact_account_for_list(row: dict) -> dict:
     for key in (
         "user_name", "email_source", "note", "archived", "created_at",
         "plan_type", "current_plan_type", "plus_trial_eligible",
+        "plus_trial_coupon_state", "plus_trial_coupon_eligible",
+        "plus_trial_coupon_error", "plus_yearly_new_user_eligible",
         "plan_check_status", "codex_status", "codex_agent_status",
     ):
         if key in row:
@@ -126,6 +177,45 @@ def _compact_account_for_list(row: dict) -> dict:
     return out
 
 
+def _compact_plus_check_account(row: dict) -> dict:
+    """独立 PLUS 查询页使用的非敏感账号状态。"""
+    keys = (
+        "id", "email", "plus_check_imported_at", "plus_check_import_format",
+        "plus_check_synthetic_email", "plan_type", "current_plan_type",
+        "has_active_subscription", "plus_trial_eligible", "plan_check_status",
+        "plus_trial_coupon_state", "plus_trial_coupon_eligible",
+        "plus_trial_coupon_error", "plus_yearly_new_user_eligible",
+        "plan_check_ok", "plan_check_error", "account_validity", "plan_check_trigger",
+        "plan_check_queued_at", "plan_check_started_at", "plan_checked_at",
+        "plan_expires_at", "plan_renews_at", "billing_period", "billing_currency",
+        "quota_check_status", "quota_check_ok", "quota_check_error", "quota_checked_at",
+        "primary_used_percent", "primary_remaining_percent", "primary_limit_window_seconds",
+        "primary_reset_after_seconds", "primary_reset_at_iso", "secondary_used_percent",
+        "secondary_remaining_percent", "secondary_reset_at_iso", "quota_allowed",
+        "quota_limit_reached", "credits_has_credits", "credits_unlimited", "credits_balance",
+    )
+    out = {key: row.get(key) for key in keys if row.get(key) is not None and row.get(key) != ""}
+    out["id"] = row.get("id")
+    out["email"] = row.get("email")
+    out["has_access_token"] = bool(str(row.get("access_token") or "").strip())
+    plan = str(row.get("current_plan_type") or row.get("plan_type") or "").strip().lower()
+    status = str(row.get("plan_check_status") or "").lower()
+    if status in {"queued", "running"}:
+        plus_status = "checking"
+    elif status == "failed" or row.get("plan_check_ok") is False:
+        plus_status = "failed"
+    elif "plus" in plan:
+        plus_status = "opened"
+    elif any(name in plan for name in ("pro", "team", "go", "enterprise")):
+        plus_status = "other_paid"
+    elif status == "success" or row.get("plan_check_ok") is True:
+        plus_status = "not_opened"
+    else:
+        plus_status = "unknown"
+    out["plus_status"] = plus_status
+    return out
+
+
 def _account_secret_value(row: dict, field: str) -> str:
     field = (field or "").strip()
     if field == "access_token":
@@ -146,7 +236,6 @@ def _compact_job_for_list(row: dict) -> dict:
     for key in (
         "parent_job_id", "retry_attempt", "email", "started_at", "completed_at",
         "display_status", "retryable", "retry_action", "retry_label",
-        "manual_otp_required",
     ):
         value = row.get(key)
         if value is not None and value != "" and value is not False:
@@ -168,6 +257,16 @@ def _job_status_counts(rows: list[dict]) -> dict:
 
 def create_app(auth_code: str | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates")
+    # 内置 link-pp：与注册机共用 5000 端口和进程，不再依赖独立 Docker 服务。
+    try:
+        from vendor.link_pp.handoff import create_app as create_linkpp_app
+        from werkzeug.middleware.dispatcher import DispatcherMiddleware
+        app.wsgi_app = DispatcherMiddleware(app.wsgi_app, {
+            "/link-pp": create_linkpp_app({"TESTING": False}).wsgi_app,
+        })
+        logger.info("[link-pp] 已内置挂载到 /link-pp")
+    except Exception:
+        logger.exception("[link-pp] 内置挂载失败；提链服务将保留外部 API 兼容")
     _prepared_downloads: dict[str, dict] = {}
 
     def _put_prepared_download(content: bytes, filename: str, mimetype: str = "application/zip") -> str:
@@ -208,15 +307,38 @@ def create_app(auth_code: str | None = None) -> Flask:
 
     init_auth(app, auth_code=auth_code)
     register_auth_routes(app)
+
+    # 初始化代理入口池；健康探测放到任务开始前，避免 WebUI 启动被网络超时阻塞。
+    try:
+        from config.proxy import THORDATA_COUNTRY, THORDATA_ENABLED, _mask_proxy, ensure_reg_proxy_pool, pick_proxy
+        pool = ensure_reg_proxy_pool()
+        sample = pick_proxy()
+        logger.info(
+            "[proxy] 代理入口池已加载 mode=%s count=%s sample=%s country=%s（任务开始前会执行健康探测）",
+            "ThorData" if THORDATA_ENABLED else "static/Cliproxy",
+            len(pool), _mask_proxy(sample) or "-", str(THORDATA_COUNTRY or "US"),
+        )
+    except Exception as exc:
+        logger.error("[proxy] 代理初始化失败；注册与查询将中止，不会回退本机 IP：%s", exc)
+
     recovered_plan_checks = db.recover_interrupted_plan_checks()
     if recovered_plan_checks:
         logger.warning("已恢复 %s 个因 WebUI 重启中断的套餐查询状态", recovered_plan_checks)
+    recovered_quota_checks = db.recover_interrupted_quota_checks()
+    if recovered_quota_checks:
+        logger.warning("已恢复 %s 个因 WebUI 重启中断的额度查询状态", recovered_quota_checks)
     recovered_extract_links = db.recover_interrupted_extract_links()
     if recovered_extract_links:
         logger.warning("已恢复 %s 个因 WebUI 重启中断的提链状态", recovered_extract_links)
     recovered_codex_agents = db.recover_interrupted_codex_agents()
     if recovered_codex_agents:
         logger.warning("已恢复 %s 个因 WebUI 重启中断的 Codex Agent Token 状态", recovered_codex_agents)
+
+    # 号池主动巡检线程（POOL_ENABLED 且 POOL_PROBE_INTERVAL_SECONDS>0 时生效）
+    try:
+        account_pool.start_probe_loop()
+    except Exception:
+        logger.exception("号池巡检线程启动失败")
 
     # ----------------------------------------------------------
     # 页面
@@ -237,6 +359,10 @@ def create_app(auth_code: str | None = None) -> Flask:
             resp.set_cookie("ui_mode", ui_mode, max_age=60 * 60 * 24 * 365, samesite="Lax")
         return resp
 
+    @app.get("/plus-handoff")
+    def plus_handoff_page():
+        return render_template("plus_handoff.html")
+
     # ----------------------------------------------------------
     # 统计概览
     # ----------------------------------------------------------
@@ -246,8 +372,8 @@ def create_app(auth_code: str | None = None) -> Flask:
         from core.email_provider import parse_email_sources
         pool = {"total": 0, "available": 0, "used": 0, "failed": 0}
         for src in parse_email_sources(_email_cfg.EMAIL_SOURCE):
-            # GPTMail/MailNest/CloudMail 地址按需生成，不属于本地邮箱池。
-            if src in ("gptmail", "mailnest", "cloudmail", "cloudflare"):
+            # 临时邮箱地址按需生成，不属于本地邮箱池。
+            if src in ("gptmail", "mailnest", "cloudmail", "cloudflare", "throwaway"):
                 continue
             one = (
                 db.generic_api_email_pool_summary() if src == "generic_api"
@@ -267,6 +393,124 @@ def create_app(auth_code: str | None = None) -> Flask:
             "domain_available": domain_pool.get("available", 0),
             "domain_used": domain_pool.get("used", 0),
             "domain_failed": domain_pool.get("failed", 0),
+        })
+
+    @app.post("/api/otp-viewer/fetch")
+    def api_otp_viewer_fetch():
+        """Immediately fetch OTPs from standalone email----URL entries."""
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "").strip()
+        if not text and data.get("email") and (data.get("code_url") or data.get("url")):
+            text = f"{data.get('email')}----{data.get('code_url') or data.get('url')}"
+
+        parsed = parse_otp_viewer_text(text, max_records=100)
+        records = parsed.get("records") or []
+        if not records:
+            return jsonify({
+                "ok": False,
+                "error": "未识别到可用内容，格式应为：邮箱----取码链接",
+                "errors": parsed.get("errors") or [],
+            }), 400
+
+        try:
+            timeout = max(3, min(int(data.get("timeout", 20)), 30))
+        except (TypeError, ValueError):
+            timeout = 20
+
+        results: list[dict | None] = [None] * len(records)
+        with ThreadPoolExecutor(max_workers=min(8, len(records)), thread_name_prefix="otp-viewer") as executor:
+            futures = {
+                executor.submit(
+                    fetch_latest_otp_from_url,
+                    record.get("email") or "",
+                    record.get("code_url") or "",
+                    timeout=timeout,
+                ): (index, record)
+                for index, record in enumerate(records)
+            }
+            for future in as_completed(futures):
+                index, record = futures[future]
+                try:
+                    item = future.result()
+                except Exception as exc:
+                    logger.warning(
+                        "OTP viewer fetch failed for %s: %s",
+                        record.get("email") or "-",
+                        type(exc).__name__,
+                    )
+                    item = {
+                        "ok": False,
+                        "email": record.get("email") or "",
+                        "code": None,
+                        "http_status": None,
+                        "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "url": mask_code_url(record.get("code_url") or ""),
+                        "error": f"获取失败：{type(exc).__name__}",
+                    }
+                item["line_no"] = record.get("line_no")
+                results[index] = item
+
+        items = [item for item in results if item is not None]
+        success_count = sum(1 for item in items if item.get("ok"))
+        return jsonify({
+            "ok": True,
+            "items": items,
+            "count": len(items),
+            "success_count": success_count,
+            "failed_count": len(items) - success_count,
+            "errors": parsed.get("errors") or [],
+        })
+
+    @app.post("/api/mail-viewer/fetch")
+    def api_mail_viewer_fetch():
+        """Read all visible messages from one or more mailbox archive URLs."""
+        data = request.get_json(silent=True) or {}
+        parsed = parse_mail_viewer_input(data.get("text") or data.get("url") or "", max_urls=20)
+        records = parsed.get("records") or []
+        if not records:
+            errors = parsed.get("errors") or []
+            reason = str((errors[0] or {}).get("reason") or "未识别到邮箱链接") if errors else "未识别到邮箱链接"
+            return jsonify({"ok": False, "error": reason, "errors": errors}), 400
+        try:
+            timeout = max(3, min(int(data.get("timeout", 20)), 30))
+        except (TypeError, ValueError):
+            timeout = 20
+
+        results: list[dict | None] = [None] * len(records)
+        with ThreadPoolExecutor(max_workers=min(5, len(records)), thread_name_prefix="mail-viewer") as executor:
+            futures = {
+                executor.submit(fetch_mail_archive, record.get("url") or "", timeout=timeout): (index, record)
+                for index, record in enumerate(records)
+            }
+            for future in as_completed(futures):
+                index, record = futures[future]
+                try:
+                    item = future.result()
+                except Exception as exc:
+                    logger.warning("Mail viewer fetch failed: %s", type(exc).__name__)
+                    item = {
+                        "ok": False,
+                        "url": mask_mail_url(record.get("url") or ""),
+                        "mailbox": "未知邮箱",
+                        "messages": [],
+                        "message_count": 0,
+                        "plus_count": 0,
+                        "has_plus": False,
+                        "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "error": f"获取失败：{type(exc).__name__}",
+                    }
+                item["line_no"] = record.get("line_no")
+                results[index] = item
+
+        items = [item for item in results if item is not None]
+        return jsonify({
+            "ok": True,
+            "items": items,
+            "mailbox_count": len(items),
+            "message_count": sum(int(item.get("message_count") or 0) for item in items),
+            "plus_count": sum(int(item.get("plus_count") or 0) for item in items),
+            "failed_count": sum(1 for item in items if not item.get("ok")),
+            "errors": parsed.get("errors") or [],
         })
 
     # ----------------------------------------------------------
@@ -311,6 +555,382 @@ def create_app(auth_code: str | None = None) -> Flask:
             snapshot = db.list_account_plan_check_statuses(limit=max(1, min(5000, limit)), archived=archived, plan_filter=plan_filter, q=q)
         snapshot["queue"] = plan_check_service.queue_settings()
         return jsonify(snapshot)
+
+    @app.get("/api/plus-check/accounts")
+    def api_plus_check_accounts():
+        """独立 PLUS 查询页列表；不返回 Token 和邮箱密码。"""
+        limit = max(1, min(5000, request.args.get("limit", default=500, type=int) or 500))
+        q = str(request.args.get("q") or "").strip()
+        rows = db.list_plus_check_accounts(limit=limit, q=q)
+        return jsonify({
+            "ok": True,
+            "items": [_compact_plus_check_account(row) for row in rows],
+            "total": len(rows),
+            "queue": plan_check_service.queue_settings(),
+        })
+
+    @app.post("/api/plus-check/login-by-mail-link")
+    def api_plus_check_login_by_mail_link():
+        """Queue protocol logins using email archive links as the OTP source."""
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "").strip()
+        if not text:
+            return jsonify({"ok": False, "error": "请粘贴邮箱----邮箱链接，或直接粘贴邮箱链接"}), 400
+        proxy = data.get("proxy") if "proxy" in data else None
+        result = enqueue_link_login_queries(text, proxy=proxy)
+        if not result.get("accepted_count"):
+            errors = result.get("errors") or []
+            reason = str((errors[0] or {}).get("reason") or "未识别到有效邮箱链接") if errors else "未识别到有效邮箱链接"
+            return jsonify({**result, "error": reason}), 400
+        return jsonify(result), 202
+
+    @app.get("/api/plus-check/login-by-mail-link/jobs")
+    def api_plus_check_login_by_mail_link_jobs():
+        jobs = list_link_login_jobs()
+        return jsonify({"ok": True, "items": jobs, "total": len(jobs), **link_login_pause_state()})
+
+    @app.post("/api/plus-check/login-by-mail-link/pause")
+    def api_plus_check_login_by_mail_link_pause():
+        return jsonify(pause_link_login_jobs())
+
+    @app.post("/api/plus-check/login-by-mail-link/resume")
+    def api_plus_check_login_by_mail_link_resume():
+        return jsonify(resume_link_login_jobs())
+
+    @app.post("/api/plus-check/login-by-mail-link/clear")
+    def api_plus_check_login_by_mail_link_clear():
+        removed = clear_link_login_jobs(completed_only=True)
+        return jsonify({"ok": True, "removed_count": removed})
+
+    @app.post("/api/plus-check/import")
+    def api_plus_check_import():
+        """自动识别账号格式，导入/更新 Token 后立即排队查询 PLUS。"""
+        data = request.get_json(silent=True) or {}
+        parsed = parse_account_import_text(data.get("text") or "", max_records=500)
+        proxy = data.get("proxy") if "proxy" in data else ""
+        timezone_offset_min = str(data.get("timezone_offset_min") or "-")
+        result, status = import_and_enqueue_plus_accounts(
+            parsed,
+            proxy=proxy,
+            timezone_offset_min=timezone_offset_min,
+        )
+        return jsonify(result), status
+
+    @app.post("/api/plus-check/import-archive")
+    def api_plus_check_import_archive():
+        """安全读取 ZIP 内 Sub2 JSON，优先 JSON 并忽略同名四字段 TXT。"""
+        uploads = request.files.getlist("files") or request.files.getlist("file")
+        if not uploads:
+            return jsonify({"ok": False, "error": "请选择 ZIP 压缩包"}), 400
+        if len(uploads) > 20:
+            return jsonify({"ok": False, "error": "单次最多上传 20 个 ZIP"}), 400
+
+        chunks: list[str] = []
+        archive_summaries: list[dict] = []
+        for upload in uploads:
+            filename = str(upload.filename or "archive.zip")
+            if not filename.lower().endswith(".zip"):
+                return jsonify({"ok": False, "error": f"仅支持 ZIP 压缩包：{filename}"}), 400
+            raw = upload.stream.read(50_000_001)
+            if len(raw) > 50_000_000:
+                return jsonify({"ok": False, "error": f"ZIP 文件超过 50MB：{filename}"}), 400
+            try:
+                normalized = normalize_plus_archive(raw)
+            except AccountArchiveError as exc:
+                return jsonify({"ok": False, "error": f"{filename}：{exc}"}), 400
+            chunks.append(normalized.pop("text"))
+            normalized["filename"] = filename
+            archive_summaries.append(normalized)
+
+        parsed = parse_account_import_text("\n".join(chunks), max_records=500)
+        result, status = import_and_enqueue_plus_accounts(parsed, proxy="", timezone_offset_min="-")
+        result["archives"] = archive_summaries
+        result["archive_count"] = len(archive_summaries)
+        return jsonify(result), status
+
+    @app.post("/api/plus-check/check")
+    def api_plus_check_recheck():
+        """重新查询独立 PLUS 查询页中的一个或多个账号，不触发自动提链。"""
+        data = request.get_json(silent=True) or {}
+        ids = data.get("account_ids") or data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"ok": False, "error": "account_ids 必须是非空数组"}), 400
+        if len(ids) > 500:
+            return jsonify({"ok": False, "error": "单次最多查询 500 个账号"}), 400
+        proxy = data.get("proxy") if "proxy" in data else ""
+        timezone_offset_min = str(data.get("timezone_offset_min") or "-")
+        started, busy, failed = [], [], []
+        seen_ids: set[int] = set()
+        for raw_id in ids:
+            try:
+                acc_id = int(raw_id)
+            except (TypeError, ValueError):
+                failed.append({"id": raw_id, "reason": "ID 非法"})
+                continue
+            if acc_id in seen_ids:
+                continue
+            seen_ids.add(acc_id)
+            acc = db.get_account(acc_id)
+            if not acc or not acc.get("plus_check_imported_at"):
+                failed.append({"id": raw_id, "reason": "PLUS 查询账号不存在"})
+                continue
+            token = str(acc.get("access_token") or "").strip()
+            context = _account_plan_check_context(acc, fallback_proxy="")
+            queued = plan_check_service.enqueue_account_plan_check(
+                account_id=int(acc.get("id")),
+                email=acc.get("email") or "",
+                access_token=token,
+                trigger="plus_query_manual",
+                proxy=proxy if "proxy" in data else "",
+                timezone_offset_min=timezone_offset_min if "timezone_offset_min" in data else context["timezone_offset_min"],
+                device_id=context["device_id"],
+                browser_profile=context["browser_profile"],
+            )
+            item = {"id": acc.get("id"), "email": acc.get("email"), **queued}
+            if queued.get("accepted"):
+                started.append(item)
+            elif queued.get("busy"):
+                busy.append(item)
+            else:
+                failed.append({**item, "reason": queued.get("error") or "查询入队失败"})
+        return jsonify({
+            "ok": True,
+            "started": started,
+            "started_count": len(started),
+            "busy": busy,
+            "busy_count": len(busy),
+            "failed": failed,
+            "failed_count": len(failed),
+        }), 202
+
+    @app.post("/api/plus-check/quota")
+    def api_plus_check_quota():
+        """批量查询 ChatGPT/Codex 使用额度。"""
+        data = request.get_json(silent=True) or {}
+        ids = data.get("account_ids") or data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"ok": False, "error": "account_ids 必须是非空数组"}), 400
+        if len(ids) > 500:
+            return jsonify({"ok": False, "error": "单次最多查询 500 个账号额度"}), 400
+        started, busy, failed = [], [], []
+        seen_ids: set[int] = set()
+        for raw_id in ids:
+            try:
+                acc_id = int(raw_id)
+            except (TypeError, ValueError):
+                failed.append({"id": raw_id, "reason": "ID 非法"})
+                continue
+            if acc_id in seen_ids:
+                continue
+            seen_ids.add(acc_id)
+            acc = db.get_account(acc_id)
+            if not acc or not acc.get("plus_check_imported_at"):
+                failed.append({"id": acc_id, "reason": "PLUS 查询账号不存在"})
+                continue
+            if acc.get("plan_check_status") != "success" or acc.get("plan_check_ok") is not True:
+                failed.append({"id": acc_id, "email": acc.get("email"), "reason": "套餐/Token 尚未验证成功，请先重新查询套餐"})
+                continue
+            queued = quota_check_service.enqueue_account_quota_check(
+                account_id=acc_id,
+                email=acc.get("email") or "",
+                access_token=acc.get("access_token") or "",
+            )
+            item = {"id": acc_id, "email": acc.get("email"), **queued}
+            if queued.get("accepted"):
+                started.append(item)
+            elif queued.get("busy"):
+                busy.append(item)
+            else:
+                failed.append({**item, "reason": queued.get("error") or "额度查询入队失败"})
+        return jsonify({
+            "ok": True,
+            "started": started,
+            "started_count": len(started),
+            "busy": busy,
+            "busy_count": len(busy),
+            "failed": failed,
+            "failed_count": len(failed),
+            "queue": quota_check_service.queue_settings(),
+        }), 202
+
+    @app.post("/api/plus-check/clear")
+    def api_plus_check_clear():
+        """清空全部或指定 PLUS 查询池记录；不删除主账号及 Token。"""
+        data = request.get_json(silent=True) or {}
+        raw_ids = data.get("account_ids") if "account_ids" in data else data.get("ids")
+        account_ids = None
+        if raw_ids is not None:
+            if not isinstance(raw_ids, list) or not raw_ids:
+                return jsonify({"ok": False, "error": "account_ids 必须是非空数组；不传表示清空全部"}), 400
+            if len(raw_ids) > 5000:
+                return jsonify({"ok": False, "error": "单次最多移除 5000 个账号"}), 400
+            account_ids = []
+            for raw_id in raw_ids:
+                try:
+                    account_ids.append(int(raw_id))
+                except (TypeError, ValueError):
+                    return jsonify({"ok": False, "error": f"账号 ID 非法: {raw_id}"}), 400
+        removed = db.clear_plus_check_accounts(account_ids=account_ids)
+        return jsonify({
+            "ok": True,
+            "removed": removed,
+            "removed_count": len(removed),
+            "accounts_preserved": True,
+        })
+
+    @app.get("/api/plus-check/export")
+    def api_plus_check_export():
+        """导出已实时确认开通 PLUS 的查询池账号。"""
+        export_format = str(request.args.get("format") or "txt").strip().lower()
+        if export_format not in {"txt", "json"}:
+            return jsonify({"ok": False, "error": "format 仅支持 txt/json"}), 400
+        rows = db.list_plus_check_accounts(limit=5000)
+        plus_rows = [
+            row for row in rows
+            if row.get("plan_check_status") == "success"
+            and row.get("plan_check_ok") is True
+            and "plus" in str(row.get("current_plan_type") or row.get("plan_type") or "").lower()
+            and str(row.get("access_token") or "").strip()
+        ]
+        if not plus_rows:
+            return jsonify({"ok": False, "error": "查询池中没有已确认开通 PLUS 的账号"}), 400
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if export_format == "json":
+            payload = [
+                {
+                    "email": row.get("email"),
+                    "access_token": row.get("access_token"),
+                    "plan_type": row.get("current_plan_type") or row.get("plan_type"),
+                    "account_id": row.get("account_id"),
+                    "expires_at": row.get("plan_expires_at") or row.get("expires_at"),
+                    "checked_at": row.get("plan_checked_at"),
+                }
+                for row in plus_rows
+            ]
+            content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+            filename = f"PLUS_accounts_{stamp}.json"
+            mimetype = "application/json; charset=utf-8"
+        else:
+            lines = [f"{row.get('email') or ''}----{row.get('access_token') or ''}" for row in plus_rows]
+            content = ("\ufeff" + "\n".join(lines) + "\n").encode("utf-8")
+            filename = f"PLUS_accounts_{stamp}.txt"
+            mimetype = "text/plain; charset=utf-8"
+        return Response(
+            content,
+            mimetype=mimetype,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(content)),
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.post("/api/plus-check/convert-cpa")
+    def api_plus_check_convert_cpa():
+        """仅导出完整且经 Codex OAuth client_id 校验的 CPA JSON，并打包 ZIP。"""
+        import io
+        import zipfile
+        from core.cpa_converter import build_cpa_auth_file, safe_cpa_filename
+
+        data = request.get_json(silent=True) or {}
+        raw_ids = data.get("account_ids") or data.get("ids")
+        selected_ids = None
+        if raw_ids is not None:
+            if not isinstance(raw_ids, list) or not raw_ids:
+                return jsonify({"ok": False, "error": "account_ids 必须是非空数组；不传表示转换全部 PLUS"}), 400
+            selected_ids = set()
+            for raw_id in raw_ids:
+                try:
+                    selected_ids.add(int(raw_id))
+                except (TypeError, ValueError):
+                    return jsonify({"ok": False, "error": f"账号 ID 非法: {raw_id}"}), 400
+
+        rows = db.list_plus_check_accounts(limit=5000)
+        plus_rows = [
+            row for row in rows
+            if (selected_ids is None or int(row.get("id") or 0) in selected_ids)
+            and row.get("plan_check_status") == "success"
+            and row.get("plan_check_ok") is True
+            and "plus" in str(row.get("current_plan_type") or row.get("plan_type") or "").lower()
+        ]
+        if not plus_rows:
+            return jsonify({"ok": False, "error": "没有可转换的已确认 PLUS 账号"}), 400
+
+        local_credentials: dict[str, dict] = {}
+        try:
+            for item in db.list_codex_accounts():
+                email_key = str(item.get("email") or "").strip().lower()
+                filename = str(item.get("filename") or "").strip()
+                if not email_key or not filename or email_key in local_credentials:
+                    continue
+                try:
+                    content, _ = db.read_codex_credential(filename)
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and parsed.get("type") == "codex":
+                        local_credentials[email_key] = parsed
+                except Exception:
+                    continue
+        except Exception:
+            local_credentials = {}
+
+        converted, errors = [], []
+        complete_count = 0
+        used_names: set[str] = set()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for row in plus_rows:
+                email = str(row.get("email") or "").strip()
+                try:
+                    auth_file, meta = build_cpa_auth_file(
+                        row,
+                        fallback_credential=local_credentials.get(email.lower()),
+                    )
+                    filename = safe_cpa_filename(email, "plus")
+                    if filename in used_names:
+                        filename = safe_cpa_filename(f"{email}-{row.get('id')}", "plus")
+                    used_names.add(filename)
+                    zf.writestr(filename, json.dumps(auth_file, ensure_ascii=False, indent=2) + "\n")
+                    meta.update({"id": row.get("id"), "filename": filename})
+                    converted.append(meta)
+                    complete_count += 1
+                except Exception as exc:
+                    errors.append({"id": row.get("id"), "email": email, "error": f"{type(exc).__name__}: {exc}"})
+            manifest = {
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "source": "plus-check-to-cpa",
+                "count": len(converted),
+                "complete_count": complete_count,
+                "rejected_count": len(errors),
+                "files": converted,
+                "errors": errors,
+                "note": "只导出同一套完整 Codex OAuth access_token/id_token/refresh_token；ChatGPT 网页 Token、缺字段或混合来源凭证会被拒绝，不再生成不可用文件。",
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+        if not converted:
+            detail = "；".join(str(item.get("error") or "") for item in errors[:3])
+            return jsonify({
+                "ok": False,
+                "error": "没有可导出的真实 Codex OAuth 凭证。请导入完整 Sub2/CPA OAuth 数据，或先完成正常 Codex 授权。" + (f" 详情：{detail}" if detail else ""),
+                "errors": errors,
+            }), 400
+        zip_bytes = buf.getvalue()
+        filename = f"PLUS_CPA_files_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+        return Response(
+            zip_bytes,
+            mimetype="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(zip_bytes)),
+                "Cache-Control": "no-store, max-age=0",
+                "X-CPA-Complete-Count": str(complete_count),
+                "X-CPA-Rejected-Count": str(len(errors)),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
 
     @app.get("/api/accounts/<int:acc_id>/secret")
@@ -371,6 +991,84 @@ def create_app(auth_code: str | None = None) -> Flask:
         if not updated:
             return jsonify({"ok": False, "error": "账号不存在"}), 404
         return jsonify({"ok": True, "updated": True, "id": acc_id, "archived": archived})
+
+    @app.post("/api/accounts/<int:acc_id>/open-browser")
+    def api_account_open_browser(acc_id: int):
+        """Open a visible CloakBrowser using the account's saved registration proxy."""
+        account = db.get_account(acc_id)
+        if not account:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        data = request.get_json(silent=True) or {}
+        result = account_browser_service.open_account_browser(
+            account,
+            allow_rotated_exit=bool(data.get("allow_rotated_exit", False)),
+        )
+        status = 202 if result.get("accepted") else 200 if result.get("busy") else 400
+        return jsonify({"ok": bool(result.get("accepted") or result.get("busy")), **result}), status
+
+    @app.post("/api/accounts/<int:acc_id>/open-billing")
+    def api_account_open_billing(acc_id: int):
+        """Open the saved account directly on ChatGPT's official Plus page."""
+        if not db.get_account(acc_id):
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        data = request.get_json(silent=True) or {}
+        from core.billing_handoff import open_billing_handoff
+        result = open_billing_handoff(
+            acc_id,
+            allow_rotated_exit=bool(data.get("allow_rotated_exit", False)),
+        )
+        status = 202 if result.get("accepted") else 200 if result.get("busy") else 400
+        return jsonify({"ok": bool(result.get("accepted") or result.get("busy")), **result}), status
+
+    @app.post("/api/accounts/<int:acc_id>/billing-short-link")
+    def api_account_billing_short_link(acc_id: int):
+        if not db.get_account(acc_id):
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        from config import billing_handoff as cfg
+        from core.plus_handoff_links import create_short_link
+        item = create_short_link(account_id=acc_id, target_url=cfg.BILLING_HANDOFF_URL)
+        return jsonify({
+            "ok": True,
+            "account_id": acc_id,
+            "url": request.host_url.rstrip("/") + "/p/" + item["code"],
+            "expires_at": item["expires_at"],
+        })
+
+    @app.get("/api/accounts/<int:acc_id>/billing-payment-link")
+    def api_account_billing_payment_link(acc_id: int):
+        if not db.get_account(acc_id):
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        state = account_browser_service.account_browser_status(acc_id)
+        return jsonify({
+            "ok": True,
+            "account_id": acc_id,
+            "status": state.get("status"),
+            "stage": state.get("checkout_stage"),
+            "payment_link": state.get("payment_link") or "",
+            "payment_status": state.get("payment_status") or "not_started",
+            "detected_plan": state.get("detected_plan") or "",
+            "error": state.get("error"),
+        })
+
+    @app.get("/p/<string:code>")
+    def billing_short_link_redirect(code: str):
+        from core.plus_handoff_links import resolve_short_link
+        item = resolve_short_link(code)
+        if not item:
+            return "短链接不存在或已过期", 404
+        return redirect(item["target_url"], code=302)
+
+    @app.get("/api/accounts/<int:acc_id>/open-browser")
+    def api_account_open_browser_status(acc_id: int):
+        if not db.get_account(acc_id):
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        return jsonify({"ok": True, **account_browser_service.account_browser_status(acc_id)})
+
+    @app.post("/api/accounts/<int:acc_id>/close-browser")
+    def api_account_close_browser(acc_id: int):
+        if not db.get_account(acc_id):
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        return jsonify(account_browser_service.close_account_browser(acc_id))
 
     @app.post("/api/accounts/archive-bulk")
     def api_accounts_archive_bulk():
@@ -488,6 +1186,7 @@ def create_app(auth_code: str | None = None) -> Flask:
 
 
     @app.post("/api/accounts/check-plan")
+    @app.post("/api/accounts/check-validity")
     def api_account_check_plan():
         """把单账号套餐查询加入后台队列。Body {account_id|email, proxy?, timezone_offset_min?}"""
         data = request.get_json(silent=True) or {}
@@ -507,13 +1206,20 @@ def create_app(auth_code: str | None = None) -> Flask:
         if not token:
             return jsonify({"ok": False, "error": "该账号没有 access_token"}), 400
         account_id = int(acc.get("id"))
+        context = _account_plan_check_context(acc, fallback_proxy=None)
         queued = plan_check_service.enqueue_account_plan_check(
             account_id=account_id,
             email=acc.get("email") or "",
             access_token=token,
-            trigger="manual",
-            proxy=data.get("proxy") if "proxy" in data else None,
-            timezone_offset_min=str(data.get("timezone_offset_min") or "-"),
+            trigger="validity" if request.path.endswith("check-validity") else "manual",
+            proxy=data.get("proxy") if "proxy" in data else "",
+            timezone_offset_min=(
+                str(data.get("timezone_offset_min") or "-")
+                if "timezone_offset_min" in data
+                else context["timezone_offset_min"]
+            ),
+            device_id=context["device_id"],
+            browser_profile=context["browser_profile"],
         )
         if queued.get("busy"):
             return jsonify({"ok": False, **queued}), 409
@@ -522,6 +1228,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         return jsonify({"ok": True, "started": True, **queued}), 202
 
     @app.post("/api/accounts/check-plan-bulk")
+    @app.post("/api/accounts/check-validity-bulk")
     def api_accounts_check_plan_bulk():
         """批量把套餐查询加入统一后台队列。Body {account_ids:[...], proxy?, timezone_offset_min?}"""
         data = request.get_json(silent=True) or {}
@@ -559,13 +1266,16 @@ def create_app(auth_code: str | None = None) -> Flask:
         busy = []
         failed = []
         for acc in items:
+            context = _account_plan_check_context(acc, fallback_proxy=None)
             queued = plan_check_service.enqueue_account_plan_check(
                 account_id=int(acc.get("id")),
                 email=acc.get("email") or "",
                 access_token=acc.get("access_token") or "",
-                trigger="manual_bulk",
-                proxy=proxy,
-                timezone_offset_min=timezone_offset_min,
+                trigger="validity_bulk" if request.path.endswith("check-validity-bulk") else "manual_bulk",
+                proxy=proxy if "proxy" in data else "",
+                timezone_offset_min=timezone_offset_min if "timezone_offset_min" in data else context["timezone_offset_min"],
+                device_id=context["device_id"],
+                browser_profile=context["browser_profile"],
             )
             item = {"id": acc.get("id"), "email": acc.get("email"), **queued}
             if queued.get("accepted"):
@@ -589,9 +1299,21 @@ def create_app(auth_code: str | None = None) -> Flask:
     @app.get("/api/extract-link/cdk")
     def api_extract_link_cdk():
         """查询当前配置或传入 CDK 的剩余次数。"""
+        if not extract_link_service.extraction_enabled():
+            return jsonify({"ok": False, "disabled": True, "error": "提链功能已关闭"}), 410
         code = (request.args.get("code") or "").strip() or None
         try:
             return jsonify({"ok": True, **extract_link_service.query_cdk(cdk=code)})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 400
+
+    @app.get("/api/extract-link/health")
+    def api_extract_link_health():
+        """探测提链远端（BurstPro GET /api/health），并回传规范化后的 api_base/docs_url。"""
+        if not extract_link_service.extraction_enabled():
+            return jsonify({"ok": False, "disabled": True, "error": "提链功能已关闭"}), 410
+        try:
+            return jsonify({"ok": True, **extract_link_service.health_check()})
         except Exception as exc:
             return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 400
 
@@ -602,6 +1324,8 @@ def create_app(auth_code: str | None = None) -> Flask:
     @app.post("/api/accounts/extract-link")
     def api_account_extract_link():
         """单账号提链。Body {account_id|id, link_type?, cdk?}。"""
+        if not extract_link_service.extraction_enabled():
+            return jsonify({"ok": False, "disabled": True, "error": "提链功能已关闭"}), 410
         data = request.get_json(silent=True) or {}
         acc_id = data.get("account_id") or data.get("id")
         try:
@@ -635,6 +1359,8 @@ def create_app(auth_code: str | None = None) -> Flask:
     @app.post("/api/accounts/extract-link-bulk")
     def api_accounts_extract_link_bulk():
         """批量提链。Body {account_ids:[...], link_type?, cdk?}。"""
+        if not extract_link_service.extraction_enabled():
+            return jsonify({"ok": False, "disabled": True, "error": "提链功能已关闭"}), 410
         data = request.get_json(silent=True) or {}
         ids = data.get("account_ids") or data.get("ids") or []
         if not isinstance(ids, list) or not ids:
@@ -1252,13 +1978,13 @@ def create_app(auth_code: str | None = None) -> Flask:
             parts = line.split("----") if "----" in line else line.split("====")
             parts = [p.strip() for p in parts]
             if source == "generic_api":
-                if len(parts) < 2:
+                parsed = parse_generic_api_line(line)
+                if not parsed:
                     continue
                 records.append({
-                    "email": parts[0],
-                    "code_url": parts[1],
-                    "access_token": parts[2] if len(parts) > 2 else "",
-                    "totp_secret": parts[3] if len(parts) > 3 else "",
+                    **parsed,
+                    "access_token": parsed.get("extra_parts", [""])[0] if parsed.get("extra_parts") else "",
+                    "totp_secret": parsed.get("extra_parts", ["", ""])[1] if len(parsed.get("extra_parts", [])) > 1 else "",
                 })
                 continue
             if len(parts) < 4:
@@ -1947,11 +2673,8 @@ def create_app(auth_code: str | None = None) -> Flask:
         page_arg = request.args.get("page", default=None, type=int)
         page_size_arg = request.args.get("page_size", default=None, type=int)
         fetch_limit = 1_000_000 if (paged or page_arg is not None or page_size_arg is not None) else limit
-        from config import email as _email_cfg
-        manual_otp_required = not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True))
         rows = db.list_jobs(limit=fetch_limit)
         for row in rows:
-            row["manual_otp_required"] = manual_otp_required
             row.update(svc.get_retry_info(row))
         if paged or page_arg is not None or page_size_arg is not None:
             page = max(1, int(page_arg or 1))
@@ -1965,14 +2688,8 @@ def create_app(auth_code: str | None = None) -> Flask:
 
     @app.post("/api/jobs")
     def api_jobs_create():
-        """启动批量注册：body {count, workers}。"""
+        """启动批量注册，或使用 mail_link_text 创建指定邮箱链接注册任务。"""
         data = request.get_json(silent=True) or {}
-        try:
-            count = int(data.get("count", 1))
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "count 非法"}), 400
-        if count < 1 or count > 200:
-            return jsonify({"ok": False, "error": "count 需在 1~200 之间"}), 400
 
         # workers 控制本次新提交任务使用的线程池；若和上次不同，服务层会为新任务切换到新池。
         try:
@@ -1980,30 +2697,78 @@ def create_app(auth_code: str | None = None) -> Flask:
         except (TypeError, ValueError):
             return jsonify({"ok": False, "error": "workers 非法"}), 400
 
-        # 提交前先确认池里有足够可用邮箱，给前端一个温和提示（不阻断）
-        from config import email as _email_cfg
-        from config import register as _register_cfg
-        from core.email_provider import parse_email_sources
-        if not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True)):
-            reg_email = str(getattr(_register_cfg, "REGISTER_EMAIL", "") or "").strip()
-            if not reg_email:
+        mail_link_text = str(data.get("mail_link_text") or "").strip()
+        if mail_link_text:
+            from config import email as _email_cfg
+            if not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True)):
                 return jsonify({
                     "ok": False,
-                    "error": "手动模式未配置 REGISTER_EMAIL。请到配置页填写「手动注册邮箱」，或开启自动取邮箱+收码。",
+                    "error": "邮箱链接注册依赖自动取码，请先开启自动取邮箱并收取验证码。",
                 }), 400
-            if count > 1:
+
+            from core.link_otp_login_service import parse_link_login_input
+
+            parsed = parse_link_login_input(mail_link_text, max_records=200)
+            records = [
+                {
+                    "line_no": item.get("line_no"),
+                    "email": item.get("email"),
+                    "password": item.get("password") or "",
+                    "code_url": item.get("mail_url"),
+                }
+                for item in (parsed.get("records") or [])
+            ]
+            if not records:
                 return jsonify({
                     "ok": False,
-                    "error": "手动模式建议每次只跑 1 个任务（同一 REGISTER_EMAIL）。请把数量设为 1。",
+                    "error": "未识别到可用于注册的邮箱查看链接。",
+                    "parsed": 0,
+                    "errors": parsed.get("errors") or [],
                 }), 400
-            jobs = svc.submit_registration(count=count, workers=workers)
+
+            imported = db.upsert_generic_api_emails_for_registration(records)
+            accepted = list(imported.get("accepted") or [])
+            errors = list(parsed.get("errors") or []) + list(imported.get("errors") or [])
+            if not accepted:
+                return jsonify({
+                    "ok": False,
+                    "error": "识别到的邮箱均已注册、重复或正在执行任务。",
+                    "parsed": int(parsed.get("count") or 0),
+                    "inserted": int(imported.get("inserted") or 0),
+                    "updated": int(imported.get("updated") or 0),
+                    "skipped": int(imported.get("skipped") or 0),
+                    "errors": errors,
+                }), 409
+
+            jobs = svc.submit_registration(
+                emails=accepted,
+                email_source="generic_api",
+                workers=workers,
+            )
             return jsonify({
                 "ok": True,
                 "submitted": len(jobs),
+                "parsed": int(parsed.get("count") or 0),
+                "inserted": int(imported.get("inserted") or 0),
+                "updated": int(imported.get("updated") or 0),
+                "skipped": int(imported.get("skipped") or 0),
+                "errors": errors,
                 "jobs": jobs,
-                "warning": f"手动 OTP 模式：将使用 {reg_email}；验证码请在任务页提交",
-                "workers": workers,
+                "warning": "" if not errors else f"有 {len(errors)} 行未提交，请查看提示。",
+                "workers": svc.get_executor_workers(),
+                "requested_workers": workers,
             })
+
+        try:
+            count = int(data.get("count", 1))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "count 非法"}), 400
+        if count < 1 or count > 200:
+            return jsonify({"ok": False, "error": "count 需在 1~200 之间"}), 400
+
+        # 提交前先确认池里有足够可用邮箱，给前端一个温和提示（不阻断）
+        from config import email as _email_cfg
+        from core.email_provider import parse_email_sources
         sources = parse_email_sources(_email_cfg.EMAIL_SOURCE)
         if "gptmail" in sources:
             api_key = str(getattr(_email_cfg, "GPTMAIL_API_KEY", "") or "").strip()
@@ -2054,7 +2819,7 @@ def create_app(auth_code: str | None = None) -> Flask:
                     "ok": False,
                     "error": "已选择 cloudmail 邮箱来源，请填写 CloudMail Token（配置 → 邮箱 / OTP）。",
                 }), 400
-        if "gptmail" in sources or "mailnest" in sources or "cloudmail" in sources or "cloudflare" in sources:
+        if any(source in sources for source in ("gptmail", "mailnest", "cloudmail", "cloudflare", "throwaway")):
             # 临时邮箱在任务开始时动态生成，不需要本地邮箱池容量提示。
             warning = ""
         elif "cloudflare_domain" in sources:
@@ -2082,32 +2847,14 @@ def create_app(auth_code: str | None = None) -> Flask:
             if pool.get("available", 0) < count:
                 warning = f"可用邮箱仅 {pool.get('available', 0)} 个，少于任务数 {count}，不足的会失败"
         jobs = svc.submit_registration(count=count, workers=workers)
-        return jsonify({"ok": True, "submitted": len(jobs), "jobs": jobs, "warning": warning, "workers": workers})
-
-    @app.get("/api/manual-otp/waiting")
-    def api_manual_otp_waiting():
-        """列出当前正在等待手动验证码的邮箱。"""
-        from core.manual_otp import list_waiting
-        return jsonify({"ok": True, "waiting": list_waiting()})
-
-    @app.post("/api/manual-otp")
-    def api_manual_otp_submit():
-        """提交手动邮箱验证码。Body: {email, code} 或 {job_id, code}。"""
-        from core.manual_otp import submit_manual_otp
-        data = request.get_json(silent=True) or {}
-        code = (data.get("code") or data.get("otp") or "").strip()
-        email = (data.get("email") or "").strip()
-        job_id = data.get("job_id")
-        if not email and job_id is not None:
-            job = db.get_job(int(job_id))
-            email = (job or {}).get("email") or ""
-        if not email:
-            return jsonify({"ok": False, "error": "email/job_id 缺失"}), 400
-        try:
-            result = submit_manual_otp(email, code)
-            return jsonify(result)
-        except Exception as exc:
-            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 400
+        return jsonify({
+            "ok": True,
+            "submitted": len(jobs),
+            "jobs": jobs,
+            "warning": warning,
+            "workers": svc.get_executor_workers(),
+            "requested_workers": workers,
+        })
 
     @app.post("/api/jobs/cancel-pending")
     def api_jobs_cancel_pending():
@@ -2183,13 +2930,17 @@ def create_app(auth_code: str | None = None) -> Flask:
 
     @app.post("/api/jobs/<int:job_id>/delete")
     def api_job_delete(job_id: int):
-        """删除一个任务记录。运行中的任务不允许删除；排队任务删除后执行前会自动跳过。"""
+        """删除一个任务记录。真正运行中的任务不允许删除；僵尸任务（无活跃实例）可直接删除。"""
         job = db.get_job(job_id)
         if not job:
             return jsonify({"ok": False, "error": "任务不存在"}), 404
-        if job.get("status") in ("running", "stopping"):
+        status = job.get("status")
+        if status in ("running", "stopping") and svc.is_job_active(job_id):
             return jsonify({"ok": False, "error": "运行中的任务不能删除，请等待完成后再删"}), 409
-        deleted = db.delete_job(job_id, delete_log=True, allow_running=False)
+        # 僵尸任务（磁盘 running/stopping 但 _ACTIVE_JOBS 中无真实实例）允许删除：
+        # 直接物理删除记录与日志，而不是先改写 stopped，避免多余一步写入，
+        # 记录删除后前台列表立即消失。
+        deleted = db.delete_job(job_id, delete_log=True, allow_running=status in ("running", "stopping"))
         if not deleted:
             return jsonify({"ok": False, "error": "任务不存在或已开始运行"}), 409
         return jsonify({"ok": True, "deleted": deleted})
@@ -2221,10 +2972,13 @@ def create_app(auth_code: str | None = None) -> Flask:
             if not job:
                 skipped.append({"id": job_id, "reason": "任务不存在"})
                 continue
-            if job.get("status") in ("running", "stopping"):
+            status = job.get("status")
+            if status in ("running", "stopping") and svc.is_job_active(job_id):
                 skipped.append({"id": job_id, "reason": "运行中，不能删除"})
                 continue
-            if db.delete_job(job_id, delete_log=True, allow_running=False):
+            # 僵尸任务（running/stopping 但无活跃实例）允许删除：直接物理删除记录与日志。
+            allow_running = status in ("running", "stopping")
+            if db.delete_job(job_id, delete_log=True, allow_running=allow_running):
                 deleted.append(job_id)
             else:
                 skipped.append({"id": job_id, "reason": "任务不存在或已开始运行"})
@@ -2385,5 +3139,94 @@ def create_app(auth_code: str | None = None) -> Flask:
                 else f"⚠️ 已写入文件但热加载失败（{reload_err}），需重启 Web 服务才能生效"
             ),
         })
+
+    # ----------------------------------------------------------
+    # 号池
+    # ----------------------------------------------------------
+    @app.get("/api/pool/summary")
+    def api_pool_summary():
+        """号池统计。"""
+        try:
+            return jsonify(account_pool.pool_summary())
+        except Exception as exc:
+            logger.exception("号池统计失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.get("/api/pool/accounts")
+    def api_pool_accounts():
+        """号池账号列表（带可用性判定与原因，可筛选）。"""
+        limit = request.args.get("limit", default=500, type=int)
+        q = str(request.args.get("q", default="") or "").strip()
+        status = str(request.args.get("status", default="") or "").strip()
+        try:
+            return jsonify(account_pool.list_pool_accounts(limit=limit, q=q, status=status))
+        except Exception as exc:
+            logger.exception("号池账号列表失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.post("/api/pool/acquire")
+    def api_pool_acquire():
+        """分配一个可用账号。Body 可选 {prefer_email, tags}。返回 access_token 明文。"""
+        data = request.get_json(silent=True) or {}
+        prefer_email = str(data.get("prefer_email") or "").strip()
+        tags = data.get("tags")
+        if tags is not None and not isinstance(tags, list):
+            return jsonify({"ok": False, "error": "tags 必须是字符串数组"}), 400
+        try:
+            result = account_pool.acquire(prefer_email=prefer_email or None, tags=tags)
+        except Exception as exc:
+            logger.exception("号池分配失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+        status = 404 if not result.get("ok") else 200
+        return jsonify(result), status
+
+    @app.post("/api/pool/switch")
+    def api_pool_switch():
+        """无感切号：标记当前账号额度耗尽/受限并分配下一个可用账号。
+        Body 可选 {current_email, next_prefer_email, reason}。"""
+        data = request.get_json(silent=True) or {}
+        current_email = str(data.get("current_email") or "").strip()
+        next_prefer_email = str(data.get("next_prefer_email") or "").strip()
+        reason = str(data.get("reason") or "").strip()
+        try:
+            result = account_pool.switch(
+                current_email=current_email or None,
+                next_prefer_email=next_prefer_email or None,
+                reason=reason or None,
+            )
+        except Exception as exc:
+            logger.exception("号池切号失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+        status = 404 if not result.get("ok") else 200
+        return jsonify(result), status
+
+    @app.post("/api/pool/accounts/<int:acc_id>/enable")
+    def api_pool_account_enable(acc_id: int):
+        """手动启用池内账号。"""
+        try:
+            return jsonify(account_pool.set_account_pool_state(acc_id, enabled=True))
+        except Exception as exc:
+            logger.exception("号池启用账号失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.post("/api/pool/accounts/<int:acc_id>/disable")
+    def api_pool_account_disable(acc_id: int):
+        """手动禁用（踢出）池内账号。Body 可选 {reason}。"""
+        data = request.get_json(silent=True) or {}
+        reason = str(data.get("reason") or "").strip()
+        try:
+            return jsonify(account_pool.set_account_pool_state(acc_id, enabled=False, reason=reason or None))
+        except Exception as exc:
+            logger.exception("号池禁用账号失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.post("/api/pool/probe")
+    def api_pool_probe():
+        """手动触发一轮号池巡检（对过期未查额度的账号入队额度检查）。"""
+        try:
+            return jsonify(account_pool.enqueue_pool_probe())
+        except Exception as exc:
+            logger.exception("号池巡检失败")
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 500
 
     return app

@@ -21,7 +21,8 @@ from core import codex_retry_service, db
 logger = logging.getLogger(__name__)
 
 # 全局线程池，最大并发数（WebUI 每次提交时可按最新 workers 重建）
-_DEFAULT_MAX_WORKERS = 4
+# 默认 3：批量注册应并行；单次提交 workers=1 不应永久把池锁成串行（见 get_executor）。
+_DEFAULT_MAX_WORKERS = 3
 _MIN_MAX_WORKERS = 1
 _MAX_MAX_WORKERS = 16
 _executor: ThreadPoolExecutor | None = None
@@ -57,6 +58,14 @@ def _deactivate_job(job_id: int) -> None:
         pass
 
 
+def is_job_active(job_id: int | None) -> bool:
+    """判断任务是否有真实的活跃线程实例（即还在内存 _ACTIVE_JOBS 集合中）。"""
+    if not job_id:
+        return False
+    with _STOP_LOCK:
+        return int(job_id) in _ACTIVE_JOBS
+
+
 def is_stop_requested(job_id: int | None = None) -> bool:
     if job_id is None:
         job_id = getattr(_THREAD_CTX, "job_id", None)
@@ -76,7 +85,7 @@ def check_stop_requested() -> None:
         raise StopRequested(f"任务 #{job_id} 已被用户手动停止")
 
 
-def _append_job_log(job_id: int, message: str) -> None:
+def _append_job_log(job_id: int, message: str, tag: str = "manual-stop") -> None:
     try:
         job = db.get_job(job_id)
         log_file = job.get("log_file") if job else None
@@ -85,7 +94,7 @@ def _append_job_log(job_id: int, message: str) -> None:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%H:%M:%S")
         with Path(log_file).open("a", encoding="utf-8") as f:
-            f.write(f"{ts} [WARNING] [manual-stop] {message}\n")
+            f.write(f"{ts} [WARNING] [{tag}] {message}\n")
     except Exception:
         pass
 
@@ -104,34 +113,46 @@ def _random_display_name() -> str:
     return f"{first} {last}"
 
 
-def _prepare_registration_args() -> tuple[str, str, str]:
+def _prepare_registration_args(
+    assigned_email: str | None = None,
+    assigned_source: str | None = None,
+) -> tuple[str, str, str]:
     """复用 CLI 的默认规则，为旧 Web 任务入口补齐注册参数。"""
     # 用模块属性读，支持 WebUI 热加载
     from config import register as _r, email as _e
     from core.email_provider import acquire_email
     from core.profile_utils import generate_random_birthday
 
-    email = str(getattr(_r, "REGISTER_EMAIL", "") or "").strip()
+    assigned_email = str(assigned_email or "").strip()
+    assigned_source = str(assigned_source or "").strip().lower()
+    email = assigned_email or str(getattr(_r, "REGISTER_EMAIL", "") or "").strip()
     name = str(getattr(_r, "REGISTER_NAME", "") or "").strip()
     # WebUI/配置里有时会把空值存成 "-"，这不是合法 OpenAI 显示名，按空处理并自动生成
     if name in {"-", "—", "无", "空", "none", "None", "null", "NULL"}:
         name = ""
 
     if not name:
-        # 手动模式也自动生成显示名，减少配置负担
-        name = _random_display_name()
+        if _e.USE_EMAIL_SERVICE:
+            name = _random_display_name()
+        else:
+            raise RuntimeError("Web 任务入口无法交互输入名称，请在 config.REGISTER_NAME 配置显示名")
 
     birthday = generate_random_birthday()
 
+    # 指定邮箱链接注册必须领取任务绑定的邮箱，不能再按 EMAIL_SOURCE 顺序随机取池。
+    if assigned_email and assigned_source == "generic_api":
+        row = db.claim_generic_api_email(assigned_email)
+        if row is None:
+            current = db.get_generic_api_email_by_email(assigned_email)
+            status = str((current or {}).get("status") or "不存在")
+            raise RuntimeError(f"指定邮箱不可用：{assigned_email}（状态：{status}）")
+        email = str(row.get("email") or assigned_email).strip()
     # 邮箱领取会把池状态置为 used，因此放在所有其他准备逻辑之后。
-    if not email:
+    elif not email:
         if _e.USE_EMAIL_SERVICE:
             email = acquire_email()
         else:
-            raise RuntimeError(
-                "手动模式未配置邮箱。请在 WebUI 配置页设置 REGISTER_EMAIL，"
-                "或开启 USE_EMAIL_SERVICE 并从邮箱池领取。"
-            )
+            raise RuntimeError("Web 任务入口无法交互输入邮箱，请在 config.REGISTER_EMAIL 配置邮箱")
 
     return email, name, birthday
 
@@ -173,6 +194,7 @@ def _should_disable_failed_registration_email(error: object) -> bool:
         or "邮箱提交后进入登录密码页" in text
         or "auth.openai.com/log-in/password" in text
         or "/log-in/password" in text
+        or "user_already_exists" in text
     )
 
 
@@ -201,34 +223,81 @@ def _normalize_workers(max_workers: int | None) -> int:
     return max(_MIN_MAX_WORKERS, min(_MAX_MAX_WORKERS, value))
 
 
+def resolve_submit_workers(*, count: int = 1, workers: int | None = None) -> int:
+    """解析本次提交应用的并发数。
+
+    规则：
+    - 显式 workers 优先，夹在 1~16；
+    - 批量 count>=2 且请求 workers<=1 时，自动抬到 min(count, 默认3)，避免「开了 5 个任务却串行」；
+    - 单任务 count==1 允许 workers=1（不浪费浏览器），但不因此永久锁死后续批量（见 get_executor 的不降级策略）。
+    """
+    requested = _normalize_workers(workers if workers is not None else _DEFAULT_MAX_WORKERS)
+    try:
+        n = max(1, int(count or 1))
+    except (TypeError, ValueError):
+        n = 1
+    if n >= 2 and requested <= 1:
+        bumped = min(n, _DEFAULT_MAX_WORKERS)
+        logger.warning(
+            "[Service] 批量 count=%s 但 workers=%s，自动改为 %s 以启用并发",
+            n, requested, bumped,
+        )
+        return bumped
+    if n >= 2:
+        # 批量时 workers 至少 2，且不超过任务数（多余线程无意义）
+        return max(2, min(requested, n, _MAX_MAX_WORKERS))
+    return requested
+
+
 def get_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
     """返回注册线程池。
 
     旧逻辑只在首次创建线程池时使用 max_workers，后续 WebUI 改线程数再提交仍会复用
     上一次的池。这里改成：每次传入的 max_workers 和当前池不一致时，立即创建新池供
     新提交任务使用；旧池不接收新任务，但会继续把已经排队/运行的任务跑完。
+
+    重要：单次「workers=1」的提交**不会把已有更大的池降级**。
+    否则 UI 误传 1 或单任务调试后，后续批量会一直串行（日志里 workers=1 的根因）。
+    只有明确请求更大并发，或当前池尚不存在时，才按请求值建池；
+    若请求值更小且池已存在，保持现有池容量，仅用现有池跑（多出来的线程空闲即可）。
     """
     global _executor, _executor_workers, _executor_generation
     requested_workers = _normalize_workers(max_workers) if max_workers is not None else _executor_workers
     with _executor_lock:
-        if _executor is None or requested_workers != _executor_workers:
-            old_executor = _executor
-            if old_executor is not None:
-                # 不取消旧池里已提交的任务，只是不再往旧池追加新任务。
-                old_executor.shutdown(wait=False, cancel_futures=False)
-                _retired_executors.append(old_executor)
-                logger.info(
-                    "[Service] 注册线程池 workers 从 %s 切换为 %s；旧池继续处理已排队任务",
-                    _executor_workers,
-                    requested_workers,
-                )
+        if _executor is None:
             _executor_workers = requested_workers
             _executor_generation += 1
             _executor = ThreadPoolExecutor(
                 max_workers=requested_workers,
                 thread_name_prefix=f"reg-worker-{_executor_generation}",
             )
-    return _executor
+            logger.info("[Service] 创建注册线程池 workers=%s", requested_workers)
+            return _executor
+
+        if requested_workers > _executor_workers:
+            # 升配：建更大的新池，旧池把在途任务跑完
+            old_executor = _executor
+            old_executor.shutdown(wait=False, cancel_futures=False)
+            _retired_executors.append(old_executor)
+            logger.info(
+                "[Service] 注册线程池 workers 从 %s 升到 %s；旧池继续处理已排队任务",
+                _executor_workers,
+                requested_workers,
+            )
+            _executor_workers = requested_workers
+            _executor_generation += 1
+            _executor = ThreadPoolExecutor(
+                max_workers=requested_workers,
+                thread_name_prefix=f"reg-worker-{_executor_generation}",
+            )
+        elif requested_workers < _executor_workers:
+            # 不降级：避免 workers=1 的单次提交把并发锁死
+            logger.info(
+                "[Service] 本次请求 workers=%s < 当前池 %s，保持不降级（避免并发被锁成串行）",
+                requested_workers,
+                _executor_workers,
+            )
+        return _executor
 
 
 def get_executor_workers() -> int:
@@ -305,7 +374,12 @@ def _run_one_job(job_id: int, log_file: str) -> None:
         with _JobLogContext(log_file):
             from main import run_registration
             log_logger.info(f"[Job {job_id}] 开始注册任务")
-            email, name, birthday = _prepare_registration_args()
+            assigned_email = str(current.get("email") or "").strip()
+            assigned_source = str(current.get("email_source") or "").strip()
+            email, name, birthday = _prepare_registration_args(
+                assigned_email=assigned_email or None,
+                assigned_source=assigned_source or None,
+            )
             db.update_job(job_id, email=email)
             check_stop_requested()
             result = run_registration(email=email, name=name, birthday=birthday)
@@ -434,26 +508,39 @@ def _run_codex_retry_job(job_id: int, log_file: str, email: str, account_id: int
 # 公共接口
 # ============================================================
 
-def submit_registration(count: int = 1, email_source: str | None = None, workers: int | None = None) -> list[dict]:
+def submit_registration(
+    count: int = 1,
+    email_source: str | None = None,
+    workers: int | None = None,
+    emails: list[str] | None = None,
+) -> list[dict]:
     """
-    创建 N 个注册任务并提交到线程池。
-    email_source 仅记录到 DB；实际邮箱来源固定为 Outlook 账号池。
+    创建注册任务并提交到线程池。
+    emails 非空时，每个任务绑定一个明确邮箱；否则按 count 从配置邮箱源领取。
 
     Returns:
         N 个新创建的 job dict
     """
+    assigned_emails = [str(item or "").strip() for item in (emails or []) if str(item or "").strip()]
+    if assigned_emails:
+        count = len(assigned_emails)
     if email_source is None:
         from config import email as _email_cfg
         email_source = _email_cfg.EMAIL_SOURCE
 
     # 创建/切换线程池和提交本批任务必须整体串行化：否则另一请求在本批提交中途
     # 切换 workers 并 shutdown 旧池，会导致后续 submit 报 cannot schedule new futures after shutdown。
+    effective_workers = resolve_submit_workers(count=count, workers=workers)
     with _executor_lock:
-        executor = get_executor(max_workers=workers)
-        effective_workers = get_executor_workers()
+        executor = get_executor(max_workers=effective_workers)
+        pool_workers = get_executor_workers()
         jobs = []
-        for _ in range(count):
-            job = db.create_job(email_source=email_source)
+        for index in range(count):
+            assigned_email = assigned_emails[index] if assigned_emails else None
+            job = db.create_job(
+                email_source=email_source,
+                email=assigned_email,
+            )
             try:
                 executor.submit(_run_one_job, job["id"], job["log_file"])
             except Exception as exc:
@@ -465,7 +552,10 @@ def submit_registration(count: int = 1, email_source: str | None = None, workers
                 )
                 logger.exception("[Service] 注册任务 #%s 提交线程池失败", job["id"])
             jobs.append(db.get_job(int(job["id"])) or job)
-    logger.info(f"[Service] 已提交 {count} 个注册任务，源={email_source}，workers={effective_workers}")
+    logger.info(
+        f"[Service] 已提交 {count} 个注册任务，源={email_source}，"
+        f"请求workers={workers} → 生效={effective_workers}，池大小={pool_workers}"
+    )
     return jobs
 
 
@@ -513,6 +603,15 @@ def get_retry_info(job: dict) -> dict:
         if codex_status == "success":
             info["retry_reason"] = "账号和 Codex 授权均已完成"
             return info
+        # 用户没开 Codex 自动授权时，不补跑 Codex（账号已注册成功即可）
+        try:
+            from config import codex as _codex_cfg
+            _codex_auto = bool(getattr(_codex_cfg, "ENABLE_CODEX_AUTO", False))
+        except Exception:
+            _codex_auto = False
+        if not _codex_auto:
+            info["retry_reason"] = "Codex 未启用（ENABLE_CODEX_AUTO=False），账号已注册无需补跑"
+            return info
         info.update({
             "retryable": True,
             "retry_action": "codex",
@@ -556,7 +655,10 @@ def retry_job(job_id: int, workers: int | None = None) -> dict:
             int(job_id),
             job_type="codex_retry" if action == "codex" else "registration",
             email_source=str(source.get("email_source") or "outlook"),
-            email=email if action == "codex" else None,
+            email=email if (
+                action == "codex"
+                or str(source.get("email_source") or "").strip() == "generic_api"
+            ) else None,
             account_id=account_id if action == "codex" else None,
         )
     except LookupError as exc:
@@ -636,6 +738,87 @@ def cancel_pending_jobs() -> int:
             cancelled += 1
     logger.info(f"[Service] 已取消 {cancelled} 个排队任务")
     return cancelled
+
+
+def resume_pending_jobs(workers: int | None = None) -> int:
+    """进程重启后，把尚未开始的注册任务重新提交到新线程池。"""
+    pending = [
+        job
+        for job in db.list_jobs(limit=1000)
+        if job.get("status") == "pending"
+        and str(job.get("job_type") or "registration") == "registration"
+    ]
+    if not pending:
+        return 0
+
+    effective_workers = resolve_submit_workers(count=len(pending), workers=workers)
+    resumed = 0
+    with _executor_lock:
+        executor = get_executor(max_workers=effective_workers)
+        for job in sorted(pending, key=lambda row: int(row.get("id") or 0)):
+            job_id = int(job.get("id") or 0)
+            log_file = str(job.get("log_file") or "")
+            if job_id <= 0 or not log_file:
+                continue
+            try:
+                executor.submit(_run_one_job, job_id, log_file)
+                _append_job_log(
+                    job_id,
+                    "进程重启后恢复排队任务：已重新提交到注册线程池。",
+                    tag="pending-resume",
+                )
+                resumed += 1
+            except Exception:
+                logger.exception("[Service] 恢复排队任务 #%s 失败", job_id)
+    if resumed:
+        logger.warning(
+            "[Service] 已恢复 %s 个进程重启前的排队注册任务（workers=%s）",
+            resumed,
+            effective_workers,
+        )
+    return resumed
+
+
+def reap_zombie_jobs() -> int:
+    """
+    回收“僵尸任务”：磁盘上 status 为 running/stopping，
+    但进程内存 _ACTIVE_JOBS 中已无对应线程实例的任务。
+    典型来源：WebUI 进程崩溃/重启后内存态丢失，而磁盘记录不会自动改状态，
+    导致前台永远显示 running、无法删除/停止。把它们标记为 stopped 以便清理。
+    幂等：第二次调用不会重复处理已回收的任务。返回本次回收数量。
+    """
+    jobs = db.list_jobs(limit=1000)
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    reaped = 0
+    for job in jobs:
+        job_id = int(job.get("id") or 0)
+        if job_id <= 0:
+            continue
+        if job.get("status") not in ("running", "stopping"):
+            continue
+        with _STOP_LOCK:
+            active = job_id in _ACTIVE_JOBS
+            if not active:
+                _STOP_EVENTS.pop(job_id, None)
+                _ACTIVE_JOBS.discard(job_id)
+        if active:
+            continue
+        try:
+            db.update_job(
+                job_id,
+                status="stopped",
+                completed_at=now_iso,
+                error="进程重启/任务实例丢失，僵尸任务已回收",
+            )
+        except Exception:
+            logger.exception("回收僵尸任务 #%s 失败", job_id)
+            continue
+        _append_job_log(job_id, "进程重启后回收僵尸任务：任务实例已丢失，已标记为已停止。", tag="zombie-reap")
+        logger.warning("[Service] 回收僵尸任务 #%s（status=%s）", job_id, job.get("status"))
+        reaped += 1
+    if reaped:
+        logger.info("[Service] 已回收 %s 个僵尸任务", reaped)
+    return reaped
 
 
 def request_stop_job(job_id: int) -> dict:

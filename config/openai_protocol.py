@@ -48,3 +48,13 @@ CHATGPT_ANON_BOOTSTRAP_ENABLED = True
 CHATGPT_AUTH_BOOTSTRAP_ENABLED = True
 # True 时预热失败会中断主流程；默认 False，仅记录日志并继续。
 CHATGPT_BOOTSTRAP_STRICT = False
+
+# bootstrap 预热链路里的“可选前端预热请求”（system_hints / models 等 model picker
+# 相关 GET）默认乱序发送，并按概率跳过部分请求，避免每次首屏请求列表完全一致。
+BOOTSTRAP_SHUFFLE_OPTIONAL = True
+BOOTSTRAP_OPTIONAL_SKIP_PROBABILITY = 0.15
+
+# Sentinel p 指纹里的 performance.now()/timeOrigin：同一会话内要求 p[13] 单调
+# 递增、p[17] 稳定（模拟页面存活期间的性能时钟）。关闭后恢复每次请求都重新随机
+# 的旧行为（会出现“性能时钟倒退”的内部矛盾，仅用于对照实验）。
+SENTINEL_MONOTONIC_PERF = True

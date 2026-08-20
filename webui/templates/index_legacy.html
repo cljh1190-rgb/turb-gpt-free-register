@@ -366,7 +366,6 @@
       <h1>GPT 注册控制台</h1>
       <p class="meta">本地 Web 控制台 · 数据更新于 <span id="updatedAt">-</span></p>
       <div class="header-links">
-        <a href="https://t.me/+gu_cvEKq_vcyZWRl" target="_blank" rel="noopener noreferrer">TG 交流群</a>
         <a href="/?ui=modern" title="切换到新版侧边栏 UI">切换新 UI</a>
         <form method="post" action="/logout"><button type="submit">退出</button></form>
       </div>
@@ -574,7 +573,7 @@
   <!-- ============ 邮箱池 ============ -->
   <div id="tab-outlook" class="hidden">
     <section class="card">
-      <div class="head"><h2>导入邮箱素材</h2><p>Outlook：邮箱----密码----clientId----refreshToken；通用API：邮箱----取码地址（---- 或 ==== 分隔均可）。默认按“已注册成功账号”导入，方便直接在账号页补跑 Codex 授权。</p></div>
+      <div class="head"><h2>导入邮箱素材</h2><p>Outlook：邮箱----密码----clientId----refreshToken；通用API：邮箱----取码地址或邮箱----密码----取码地址（---- 或 ==== 分隔均可）。默认按“已注册成功账号”导入，方便直接在账号页补跑 Codex 授权。</p></div>
       <div class="body">
         <div id="importResult"></div>
         <label class="fld">导入类型
@@ -589,7 +588,7 @@
           导入后默认视为“注册成功账号”（邮箱池标记已用，并出现在账号页，可直接批量补跑 Codex）
         </label>
         <textarea id="importText" placeholder="Outlook: email----password----clientId----refreshToken
-通用API: email----取码地址"></textarea>
+通用API: email----取码地址 或 email----password----取码地址"></textarea>
         <div style="margin-top:10px;"><button class="btn primary" id="btnImport">导入</button></div>
       </div>
     </section>
@@ -837,10 +836,6 @@ function renderJobs() {
       <td class="actions-cell">
         <div class="actions job-actions">
           <button data-log-job="${esc(j.id)}">任务日志</button>
-          ${j.status === 'running' && j.email && j.manual_otp_required ? `
-            <input class="manual-otp-input" data-otp-email="${esc(j.email)}" data-otp-job="${esc(j.id)}" placeholder="邮箱验证码" maxlength="8" style="width:96px;min-height:28px;padding:2px 6px;" title="手动模式下，打开邮箱后把 6 位验证码贴这里">
-            <button class="good" data-submit-otp-job="${esc(j.id)}" data-email="${esc(j.email)}">提交验证码</button>
-          ` : ''}
           ${['pending','running','stopping'].includes(j.status) ? `<button class="danger" data-stop-job="${esc(j.id)}">${j.status === 'stopping' ? '停止/修复' : '停止'}</button>` : ''}
           ${j.retryable ? `<button class="good" data-retry-job="${esc(j.id)}" title="${esc(j.retry_action === 'codex' ? '账号已创建，仅补跑 Codex 授权' : '创建新的注册任务，不覆盖原任务')}">${esc(j.retry_label || '重试')}</button>` : ''}
           <button class="danger" data-delete-job="${esc(j.id)}" ${['running','stopping'].includes(j.status) ? 'disabled title="运行中的任务不能删除；如需删除请先停止"' : ''}>删除</button>
@@ -947,11 +942,6 @@ $('#jobsBody').addEventListener('click', (e) => {
     openLog(parseInt(logBtn.dataset.logJob, 10));
     return;
   }
-  const otpBtn = e.target.closest('[data-submit-otp-job]');
-  if (otpBtn) {
-    submitManualOtpForJob(otpBtn);
-    return;
-  }
   const stopBtn = e.target.closest('[data-stop-job]');
   if (stopBtn) {
     stopJob(parseInt(stopBtn.dataset.stopJob, 10), stopBtn);
@@ -972,28 +962,6 @@ $('#jobsBody').addEventListener('click', (e) => {
   }
 });
 
-async function submitManualOtpForJob(btn) {
-  const jobId = parseInt(btn.dataset.submitOtpJob, 10);
-  const email = btn.dataset.email || '';
-  const input = document.querySelector(`.manual-otp-input[data-otp-job="${jobId}"]`);
-  const code = (input?.value || '').trim();
-  if (!code) { showToast('请先填写邮箱验证码'); return; }
-  btn.disabled = true;
-  try {
-    const r = await api('/api/manual-otp', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ email, code, job_id: jobId }),
-    });
-    showToast(r.ok ? `已提交验证码给 ${email || ('#'+jobId)}` : (r.error || '提交失败'));
-    if (input) input.value = '';
-    if (activeLogJob === jobId) pollLog();
-  } catch (e) {
-    showToast('提交验证码失败: ' + e.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
 $('#jobsBody').addEventListener('change', (e) => {
   const cb = e.target.closest('.job-row-check');
   if (!cb) return;
@@ -1284,9 +1252,13 @@ function _planCell(r) {
     if (!checkedOk) {
       return `<span class="pill status-running" title="${title}">${esc(plan)}（待查资格）</span>`;
     }
-    const text = r.plus_trial_eligible ? 'free(可Plus试用)' : 'free';
-    const cls = r.plus_trial_eligible ? 'status-success' : 'status-used';
-    const t = r.plus_trial_eligible ? `${title}；Plus 试用资格可用` : title;
+    const couponFailed = !!r.plus_trial_coupon_error;
+    const yearlyEligible = !r.plus_trial_eligible && !!r.plus_yearly_new_user_eligible;
+    const text = r.plus_trial_eligible ? 'free(可Plus试用)' : (couponFailed ? 'free(试用查询失败)' : (yearlyEligible ? 'free(可购Plus年付)' : 'free'));
+    const cls = r.plus_trial_eligible ? 'status-success' : (couponFailed ? 'status-failed' : 'status-used');
+    const t = r.plus_trial_eligible
+      ? `${title}；Plus 一月免费试用资格可用`
+      : (couponFailed ? `${title}；试用资格接口失败：${r.plus_trial_coupon_error}` : (yearlyEligible ? `${title}；仅年付新用户资格，不是免费试用` : title));
     return `<span class="pill ${cls}" title="${t}">${esc(text)}</span>`;
   }
 

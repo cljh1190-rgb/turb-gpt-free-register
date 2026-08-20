@@ -12,8 +12,6 @@ ChatGPT / OpenAI 账号自动注册与 Codex OAuth 授权工具。当前项目�
 
 > 项目说明：本项目基于 [xiaoguzuiniu/gpt-free-register](https://github.com/xiaoguzuiniu/gpt-free-register) 进行改造与扩展。
 
-- TG 交流群：[https://t.me/+gu_cvEKq_vcyZWRl](https://t.me/+gu_cvEKq_vcyZWRl)
-
 > 开源版说明：仓库只保留源码、配置模板和文档；运行时账号、Token、邮箱池、Codex 凭证、日志等真实数据均已通过 `.gitignore` 排除。
 
 ---
@@ -47,7 +45,7 @@ ChatGPT / OpenAI 账号自动注册与 Codex OAuth 授权工具。当前项目�
 - Outlook 邮箱池：`email----password----clientId----refreshToken`
 - Cloudflare 域名邮箱 + QQ 邮箱 IMAP 收信（`cloudflare_domain`）
 - Cloudflare Worker 临时邮箱：自动创建 + JWT 取码（`cloudflare`，兼容 cloudflare_temp_email）
-- 通用 API 邮箱：`email----取码地址`
+- 通用 API 邮箱：`email----取码地址` 或 `email----password----取码地址`
 - GPTMail 临时邮箱 API：运行时随机生成邮箱并自动收取验证码
 - `EMAIL_SOURCE` 支持多个来源组合，例如：
 
@@ -68,8 +66,9 @@ EMAIL_SOURCE = "outlook,generic_api"
   - `CODEX_OAUTH_DRIVER = "same_as_registration"`
 - 支持 CPA 管理接口生成授权 URL，并提交 OAuth callback。
 - 支持接码平台：
+  - HeroSMS（https://hero-sms.com/cn/api）
   - GrizzlySMS
-  - 本地 L 取号服务，见 `L_API.md`
+  - 本地 L / H 取号服务，见 `L_API.md` / `H_API.md`
 - 手机验证支持自动取号、填号、收码、提交、失败换号重试。
 - Codex 凭证落盘到 `codex_accounts/`。
 
@@ -395,7 +394,7 @@ CODEX_OAUTH_DRIVER = "browser_use"  # 可选 protocol / roxy / cloak / browser_u
 接码配置在 `config/codex.py`：
 
 ```python
-SMS_PROVIDER = "l"        # 可选 grizzly / l / h
+SMS_PROVIDER = "hero"     # 可选 hero / grizzly / l / h
 SMS_API_KEY = "你的 GrizzlySMS key"  # 仅 GrizzlySMS 需要
 SMS_SERVICE = "openai"
 SMS_COUNTRY = "国家代码"

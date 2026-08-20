@@ -36,6 +36,7 @@ data/
 # ============================================================
 __pycache__/
 .venv/
+vendor/link_pp/node_modules/
 *.py[cod]
 *$py.class
 *.so
@@ -81,3 +82,39 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Local runtime / supervisor state
+.wcx-state/
+_old_accounts_*/
+_webui*.log
+_webui*.pid
+_webui*.heartbeat
+_webui_keeper_stderr.log
+_webui_keeper_stdout.log
+_run_webui_guardian.cmd
+_start_webui_detached.vbs
+_verify_proxy_exit.py
+
+# Local backups and captured data
+*.bak
+*.bak_*
+*.jsonl
+Default-all-domains-*.json
+docs/protocol_har_summary.json
+webcodex_pool/.git/
+webcodex_pool/.wcx-state/
+webcodex_pool/__pycache__/
+webcodex_pool/_wcx_debug.log
+
+# Proxy pool runtime state and local node data
+tools/reg_proxy/config.json
+tools/reg_proxy/nodes.json
+tools/reg_proxy/pool*.json
+tools/reg_proxy/pool*.txt
+tools/reg_proxy/ok_pool.txt
+tools/reg_proxy/xray.log
+tools/reg_proxy/xray_*.out
+tools/reg_proxy/xray_*.err
+
+# Platform-specific bundled binaries
+vendor/link_pp/bin/
